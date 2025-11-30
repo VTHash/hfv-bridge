@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
-import { useWallet } from '../contexts/WalletContext'
+import { useWallet } from '../services/WalletContext'
 import { getAllSupportedChains } from 'hfv-sdk' // <-- from your SDK
-import './WalletScreen.css'
+import '../styles/WalletScreen.css'
 
 const metamaskLogo = '/logo/metamask.png'
 

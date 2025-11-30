@@ -7,7 +7,7 @@ import {
 } from 'hfv-sdk'
 
 import { useWallet } from '../services/WalletContext'
-import './Dashboard.css' // reuse your existing card + HUD style
+import '../styles/Dashboard.css' // reuse your existing card + HUD style
 
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
