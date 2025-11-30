@@ -3,7 +3,7 @@ import { useWallet } from '../services/WalletContext'
 import { getAllSupportedChains } from 'hfv-sdk' // <-- from your SDK
 import '../styles/WalletScreen.css'
 
-const metamaskLogo = '/logo/metamask.png'
+const metamaskLogo = '/public/logo/metamask.png'
 
 /** Lightweight, accessible accordion card */
 function InfoCard({ icon, title, children, defaultOpen = false }) {
