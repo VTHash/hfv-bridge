@@ -2,7 +2,6 @@ import React, { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import WalletScreen from './components/WalletScreen'
 import BridgeDashboard from './components/BridgeDashboard'
-import TipPill from './components/TipPill'
 
 const App = () => {
   const [wallet, setWallet] = useState({
