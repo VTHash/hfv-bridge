@@ -1,56 +1,56 @@
 {
   "name": "hfv-sdk",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "HFV SDK for bridge + prices + chain metadata",
-  "main": "dist/index.cjs",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "author": "HFV Protocol",
+  "license": "MIT",
+
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+
   "exports": {
     ".": {
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
-    }
+    },
+    "./*": "./dist/*"
   },
+
+  "files": ["dist"],
+
   "scripts": {
-    "build": "tsup src/index.ts --dts --format cjs,esm",
     "clean": "rm -rf dist",
-    "dev": "tsup src/index.ts --dts --format cjs,esm --watch"
+    "build": "tsup src/index.ts --dts --format esm,cjs",
+    "dev": "tsup src/index.ts --dts --format esm,cjs --watch"
   },
+
+  "dependencies": {
+    "axios": "^1.13.2"
+  },
+
+  "devDependencies": {
+    "tsup": "^8.0.1",
+    "typescript": "^5.4.0",
+    "@types/node": "^22.0.0"
+  },
+
   "keywords": [
     "web3",
     "sdk",
     "bridge",
-    "prices",
     "wormhole",
     "hfv"
   ],
-  "author": "HFV Protocol",
-  "license": "MIT",
-  "dependencies": {
-    "axios": "^1.13.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.1.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
-  },
+
   "repository": {
     "type": "git",
     "url": "git+https://github.com/VTHash/hfv-sdk.git"
   },
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/VTHash/hfv-sdk/issues"
-  },
-  "homepage": "https://github.com/VTHash/hfv-sdk#readme",
+
   "publishConfig": {
     "access": "public"
-  },
-  "files": [
-    "dist"
-  ]
+  }
 }
