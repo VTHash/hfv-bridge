@@ -1,6 +1,6 @@
 {
   "name": "hfv-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "HFV SDK for bridge + prices + chain metadata",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",

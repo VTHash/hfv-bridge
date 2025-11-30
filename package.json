@@ -8,6 +8,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@reown/appkit": "^1.8.14",
+    "@reown/appkit-adapter-ethers": "^1.8.14",
     "@tanstack/react-query": "^5.90.11",
     "@walletconnect/ethereum-provider": "^2.23.0",
     "@wormhole-foundation/sdk-base": "^4.0.2",
@@ -19,7 +21,7 @@
     "dotenv": "^17.2.3",
     "ethers": "^6.15.0",
     "express": "^5.1.0",
-    "hfv-sdk": "^0.1.1",
+    "hfv-sdk": "^0.1.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.5.0",
