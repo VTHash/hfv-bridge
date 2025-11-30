@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import WalletScreen from './components/WalletScreen'
 import BridgeDashboard from './components/BridgeDashboard'
+import { WalletProvider } from './services/WalletContext';
+import WalletScreen from './components/WalletScreen';
 
 const App = () => {
   const [wallet, setWallet] = useState({
@@ -37,7 +38,9 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <TipPill />
+   <WalletProvider>
+      <WalletScreen />
+    </WalletProvider>
     </div>
   )
 }

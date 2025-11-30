@@ -6,7 +6,7 @@ import {
   tokenRegistry
 } from 'hfv-sdk'
 
-import { useWallet } from 'src/services/WalletContext'
+import { useWallet } from '../services/WalletContext'
 import '../styles/Dashboard.css' // reuse your existing card + HUD style
 
 const fmt = (n) => Number(n || 0).toFixed(6)
