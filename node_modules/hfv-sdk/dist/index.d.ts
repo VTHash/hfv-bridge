@@ -1,0 +1,127 @@
+type HFVEnvironment = 'mainnet' | 'testnet';
+interface HFVSDKConfig {
+    /**
+     * Network environment your backend + Wormhole use.
+     */
+    env?: HFVEnvironment;
+    /**
+     * Base URL of your HFV API backend (where bridge + prices endpoints live).
+     * Example: "https://api.hfvprotocol.org" or "http://localhost:4000/api"
+     */
+    apiBaseUrl?: string;
+}
+declare const HFV_API_BASE_URL: string;
+declare const defaultConfig: Required<HFVSDKConfig>;
+
+declare class HFVClient {
+    readonly config: Required<HFVSDKConfig>;
+    constructor(userConfig?: HFVSDKConfig);
+    get apiBaseUrl(): string;
+    get env(): HFVEnvironment;
+}
+
+interface BridgeQuoteParams {
+    fromChain: string;
+    toChain: string;
+    token: string;
+    amount: string;
+    recipient: string;
+}
+interface BridgeQuote {
+    estimatedGasUsd: number;
+    estimatedOutputAmount: string;
+    routeName: string;
+    feeBreakdown: Record<string, number>;
+}
+interface BridgeTxParams extends BridgeQuoteParams {
+    quoteId?: string;
+}
+interface BridgeExecutionResult {
+    trackingId: string;
+    sourceTxHash?: string;
+}
+interface BridgeStatus {
+    status: 'pending' | 'completed' | 'failed';
+    fromChain?: string;
+    toChain?: string;
+    sourceTxHash?: string;
+    destTxHash?: string;
+    errorMessage?: string;
+}
+
+declare class HFVBridge {
+    private client;
+    private http;
+    constructor(client: HFVClient);
+    /**
+     * Request a bridge quote.
+     * POST /bridge/quote
+     */
+    getQuote(params: BridgeQuoteParams): Promise<BridgeQuote & {
+        quoteId?: string;
+    }>;
+    /**
+     * Execute the bridge.
+     * POST /bridge/execute
+     */
+    bridge(params: BridgeTxParams): Promise<BridgeExecutionResult>;
+    /**
+     * Track the bridge status.
+     * GET /bridge/status?id=...
+     */
+    getStatus(trackingId: string): Promise<BridgeStatus>;
+}
+
+type NativePriceMap = Record<number, number>;
+type TokenPriceMap = Record<string, number>;
+declare class HFVPrices {
+    private client;
+    private http;
+    constructor(client: HFVClient);
+    /**
+     * Get USD prices for native tokens across chains.
+     * GET /prices/native?chainIds=1,56,137
+     */
+    getNativePrices(chainIds?: number[]): Promise<NativePriceMap>;
+    /**
+     * Get USD prices for specific ERC-20 tokens.
+     * POST /prices/tokens
+     */
+    getTokenPrices(chainId: number, addresses: string[]): Promise<TokenPriceMap>;
+}
+
+interface ChainMetadata {
+    chainId: number;
+    key: string;
+    name: string;
+    symbol: string;
+    nativeCoingeckoId: string;
+    logo?: string;
+    supportedByWormhole: boolean;
+    wormholeChain?: string;
+}
+/**
+ * Includes ALL chains from your NATIVE_ID_BY_CHAIN mapping,
+ * plus optional Wormhole metadata where applicable.
+ */
+declare const SUPPORTED_CHAINS: ChainMetadata[];
+
+declare function getChainById(chainId: number): ChainMetadata | undefined;
+declare function getChainByKey(key: string): ChainMetadata | undefined;
+declare function getAllSupportedChains(): ChainMetadata[];
+declare function getWormholeSupportedChains(): ChainMetadata[];
+
+interface TokenInfo {
+    chainId: number;
+    address: string;
+    symbol: string;
+    name: string;
+    decimals: number;
+    priceUSD?: number;
+    coinKey?: string;
+    logoURI?: string;
+}
+type ChainTokenMap = Record<string, TokenInfo[]>;
+declare const tokenRegistry: ChainTokenMap;
+
+export { type BridgeExecutionResult, type BridgeQuote, type BridgeQuoteParams, type BridgeStatus, type BridgeTxParams, type ChainMetadata, HFVBridge, HFVClient, type HFVEnvironment, HFVPrices, type HFVSDKConfig, HFV_API_BASE_URL, SUPPORTED_CHAINS, defaultConfig, getAllSupportedChains, getChainById, getChainByKey, getWormholeSupportedChains, tokenRegistry };

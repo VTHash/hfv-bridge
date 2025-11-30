@@ -1,0 +1,34 @@
+{
+  "name": "hfv-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.11",
+    "@walletconnect/ethereum-provider": "^2.23.0",
+    "@wormhole-foundation/sdk-base": "^4.0.2",
+    "@wormhole-foundation/sdk-connect": "^4.0.2",
+    "@wormhole-foundation/sdk-evm": "^4.0.2",
+    "axios": "^1.13.2",
+    "clsx": "^2.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "ethers": "^6.15.0",
+    "express": "^5.1.0",
+    "hfv-sdk": "^0.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^6.30.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "nodemon": "^3.1.11",
+    "vite": "^6.4.1"
+  }
+}
