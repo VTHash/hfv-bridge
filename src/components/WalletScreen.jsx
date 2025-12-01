@@ -91,7 +91,7 @@ const WalletScreen = () => {
             <div className="feature-card">
               <div className="feature-icon">🧩</div>
               <h3>Powered by HFV SDK</h3>
-              <p>Your SDK provides live chain metadata, coins & prices.</p>
+              <p>Live chain metadata, coins & prices.</p>
             </div>
 
             <div className="feature-card">
