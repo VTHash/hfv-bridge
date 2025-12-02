@@ -6,10 +6,10 @@ export const CHAIN_LOGOS = {
   base: "/logo/base.png",
   bera: "/logo/bera.png",
   blast: "/logo/blast.jpeg",
-  bnbchain: "/logo/bnb.png",
+  bsc: "/logo/bnb.png",
   bob: "/logo/bob.jpg",
   celo: "/logo/celo.png",
-  ethereumclassic: "/logo/ethereum-classic.png",
+  etc: "/logo/ethereum-classic.png",
   ethereum: "/logo/ethereum.png",
   fantom: "/logo/fantom.png",
   flare: "/logo/flare.png",
@@ -38,7 +38,7 @@ export const CHAIN_LOGOS = {
   x: "/logo/X.png",
   xdc: "/logo/xdc.png",
   zora: "/logo/zora.jpg",
-  // HFV + misc
+  harmony: "/logo/harmony.png",
   hfv: "/logo/hfv-logo.png",
   github: "/logo/github-mark.png"
 };

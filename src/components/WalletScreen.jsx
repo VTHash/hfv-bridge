@@ -293,7 +293,7 @@ const WalletScreen = () => {
               <ul className="rs-info-list">
                 <li>You pay standard gas fees on both chains.</li>
                 <li>
-                  All operations go through audited Smart Contracts and
+  All operations go through audited Smart Contracts and
                   cross-chain messaging.
                 </li>
                 <li>HFV never takes custody of user funds.</li>
@@ -304,52 +304,59 @@ const WalletScreen = () => {
 
         {/* SUPPORTED CHAINS GRID (logos from /public/logo) */}
         <section className="rs-chains-section">
-          <div className="rs-chains-header">
-            <h3>Supported blockchains</h3>
-            <p>
-              Chains are loaded from  HFV and Wormhole. Click any
-              chain to open its block explorer.
-            </p>
-          </div>
+  <div className="rs-chains-header">
+    <h3>Supported blockchains</h3>
+    <p>
+      Chains are loaded from  HFV SDK configuration. Click any
+      chain to open its block explorer.
+    </p>
+  </div>
 
-          <div className="rs-chains-grid">
-            {chains.map((chain) => {
-              const logoSrc =
-                CHAIN_LOGOS[chain.key] ||
-                chain.logo ||
-                '/logo/ethereum.png'
+  <div className="rs-chains-grid">
+    {chains.map((chain) => {
+      const chainKey = chain.key?.toLowerCase();
 
-              return (
-                <a
-                  key={chain.chainId}
-                  className="rs-chain-card"
-                  href={chain.explorer || '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => {
-                    if (!chain.explorer) e.preventDefault()
-                  }}
-                >
-                  <div className="rs-chain-card__icon-wrap">
-                    <img
-                      src={logoSrc}
-                      alt={`${chain.name} logo`}
-                      className="rs-chain-card__icon"
-                    />
-                  </div>
-                  <div className="rs-chain-card__text">
-                    <span className="rs-chain-card__name">{chain.name}</span>
-                    {chain.explorer && (
-                      <span className="rs-chain-card__explorer">
-                        Open explorer →
-                      </span>
-                    )}
-                  </div>
-                </a>
-              )
-            })}
+      const logoSrc =
+        CHAIN_LOGOS[chainKey] ||
+        CHAIN_LOGOS[chainKey?.replace(/[^a-z0-9]/g, "")] ||
+        chain.logo ||
+        "/logo/ethereum.png";
+
+      // Prefer explorer from walletConnectConfig if present
+      const wcMeta = SUPPORTED_CHAINS[chain.chainId];
+      const explorer = chain.explorer || wcMeta?.explorer || "#";
+
+      return (
+        <a
+          key={chain.chainId}
+          className="rs-chain-card"
+          href={explorer}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            if (!explorer || explorer === "#") e.preventDefault();
+          }}
+        >
+          <div className="rs-chain-card__icon-wrap">
+            <img
+              src={logoSrc}
+              alt={`${chain.name} logo`}
+              className="rs-chain-card__icon"
+            />
           </div>
-        </section>
+          <div className="rs-chain-card__text">
+            <span className="rs-chain-card__name">{chain.name}</span>
+            {explorer && explorer !== "#" && (
+              <span className="rs-chain-card__explorer">
+                Open explorer →
+              </span>
+            )}
+          </div>
+        </a>
+      );
+    })}
+  </div>
+</section>
       </main>
 
       {/* FOOTER */}
