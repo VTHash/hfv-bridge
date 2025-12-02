@@ -7,13 +7,26 @@ import {
 } from 'hfv-sdk'
 
 import { useWallet } from '../services/WalletContext'
-import '../styles/Dashboard.css' // reuse your existing card + HUD style
+import '../styles/Dashboard.css'
+import { CHAIN_LOGOS } from '../config/chainLogos'
 
+// Simple number + USD formatters
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
     Number(n || 0)
   )
+
+// Helper to resolve the correct logo path for a chain
+const getChainLogo = (chain) => {
+  if (!chain) return '/logo/default.png'
+  // Prefer key (e.g. "ethereum", "base", "polygon")
+  if (chain.key && CHAIN_LOGOS[chain.key]) return CHAIN_LOGOS[chain.key]
+  // Fallback: lowercased name if you ever keyed that way
+  const nameKey = String(chain.name || '').toLowerCase()
+  if (CHAIN_LOGOS[nameKey]) return CHAIN_LOGOS[nameKey]
+  return '/logo/default.png'
+}
 
 export default function BridgeDashboard() {
   const { address } = useWallet()
@@ -59,7 +72,6 @@ export default function BridgeDashboard() {
 
     const registryEntry = tokenRegistry[fromChain.chainId] || []
     return registryEntry.filter((t) => {
-      // You can adjust this to match your registry flags
       return (
         t.isNativeWrapped ||
         t.isStablecoin ||
@@ -80,15 +92,15 @@ export default function BridgeDashboard() {
 
   async function handleGetQuote() {
     if (!address) {
-      setError('Connect your wallet first.')
+      setError('Please connect your wallet first.')
       return
     }
     if (!fromChain || !toChain || !selectedToken || !amount) {
-      setError('Please select from chain, to chain, token and amount.')
+      setError('Select a source chain, destination chain, token and amount.')
       return
     }
     if (fromChain.chainId === toChain.chainId) {
-      setError('From chain and to chain must be different.')
+      setError('Source and destination networks must be different.')
       return
     }
 
@@ -109,7 +121,7 @@ export default function BridgeDashboard() {
       setQuote(res)
     } catch (e) {
       console.error('Bridge quote error:', e)
-      setError('Failed to fetch quote. Please try again.')
+      setError('Failed to fetch a quote. Please try again in a few seconds.')
     } finally {
       setQuoteLoading(false)
     }
@@ -135,7 +147,9 @@ export default function BridgeDashboard() {
       setBridgeResult(res)
     } catch (e) {
       console.error('Bridge execute error:', e)
-      setError('Failed to execute bridge. Please check your wallet and try again.')
+      setError(
+        'Bridge transaction failed. Please check your wallet and try again.'
+      )
     } finally {
       setBridgeLoading(false)
     }
@@ -150,7 +164,7 @@ export default function BridgeDashboard() {
 
   return (
     <div className="dashboard">
-      {/* Network selector row (like DustClaim, but for Bridge) */}
+      {/* Top label row */}
       <div className="network-dropdown-wrapper">
         <button type="button" className="network-selector" disabled>
           <span>HFV Bridge • Wormhole Powered</span>
@@ -165,12 +179,35 @@ export default function BridgeDashboard() {
             {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Not connected'}
           </div>
         </div>
+
         <div className="stat-box">
           <div className="stat-label">From → To</div>
-          <div className="stat-value">
-            {fromChain && toChain ? `${fromChain.name} → ${toChain.name}` : 'Select chains'}
+          <div className="stat-value stat-value--chains">
+            {fromChain && (
+              <>
+                <img
+                  src={getChainLogo(fromChain)}
+                  alt={`${fromChain.name} logo`}
+                  className="stat-chain-logo"
+                />
+                <span>{fromChain.name}</span>
+              </>
+            )}
+            <span className="stat-arrow">→</span>
+            {toChain && (
+              <>
+                <img
+                  src={getChainLogo(toChain)}
+                  alt={`${toChain.name} logo`}
+                  className="stat-chain-logo"
+                />
+                <span>{toChain.name}</span>
+              </>
+            )}
+            {!fromChain || !toChain ? 'Select networks' : null}
           </div>
         </div>
+
         <div className="stat-box">
           <div className="stat-label">Selected Token</div>
           <div className="stat-value">
@@ -182,25 +219,34 @@ export default function BridgeDashboard() {
       {/* Bridge HUD card */}
       <div className="chain-list">
         <div className="chain-card bridge-card">
-          {/* FROM row */}
+          {/* FROM / TO row with logos */}
           <div className="chain-card-header">
             <div className="bridge-chain-select">
               <span className="bridge-label">From</span>
-              <select
-                className="bridge-select"
-                value={fromChainId}
-                onChange={(e) => {
-                  setFromChainId(Number(e.target.value))
-                  setQuote(null)
-                  setBridgeResult(null)
-                }}
-              >
-                {chains.map((c) => (
-                  <option key={c.chainId} value={c.chainId}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="bridge-select-wrapper">
+                {fromChain && (
+                  <img
+                    src={getChainLogo(fromChain)}
+                    alt={`${fromChain.name} logo`}
+                    className="bridge-chain-logo"
+                  />
+                )}
+                <select
+                  className="bridge-select"
+                  value={fromChainId}
+                  onChange={(e) => {
+                    setFromChainId(Number(e.target.value))
+                    setQuote(null)
+                    setBridgeResult(null)
+                  }}
+                >
+                  {chains.map((c) => (
+                    <option key={c.chainId} value={c.chainId}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <button
@@ -213,21 +259,30 @@ export default function BridgeDashboard() {
 
             <div className="bridge-chain-select">
               <span className="bridge-label">To</span>
-              <select
-                className="bridge-select"
-                value={toChainId}
-                onChange={(e) => {
-                  setToChainId(Number(e.target.value))
-                  setQuote(null)
-                  setBridgeResult(null)
-                }}
-              >
-                {chains.map((c) => (
-                  <option key={c.chainId} value={c.chainId}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="bridge-select-wrapper">
+                {toChain && (
+                  <img
+                    src={getChainLogo(toChain)}
+                    alt={`${toChain.name} logo`}
+                    className="bridge-chain-logo"
+                  />
+                )}
+                <select
+                  className="bridge-select"
+                  value={toChainId}
+                  onChange={(e) => {
+                    setToChainId(Number(e.target.value))
+                    setQuote(null)
+                    setBridgeResult(null)
+                  }}
+                >
+                  {chains.map((c) => (
+                    <option key={c.chainId} value={c.chainId}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -280,8 +335,9 @@ export default function BridgeDashboard() {
                 onClick={handleGetQuote}
                 disabled={quoteLoading || !address}
               >
-                {quoteLoading ? '🔍 Fetching Quote…' : '🔍 Get Bridge Quote'}
+                {quoteLoading ? '🔍 Fetching quote…' : '🔍 Get Bridge Quote'}
               </button>
+
               <button
                 type="button"
                 className="btn-secondary"
