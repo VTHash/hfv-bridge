@@ -1,21 +1,22 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from './App'
+
+// global styles
 import './styles/global.css'
 import './styles/Dashboard.css'
 import './styles/WalletScreen.css'
-import { Routes, Route, Navigate } from 'react-router-dom'
-import { WalletProvider } from "./services/WalletContext.jsx";
 
-ReactDOM.createRoot(document.getElementById("root")).render(
+import { WalletProvider } from './services/WalletContext.jsx'
 
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
     <WalletProvider>
       <BrowserRouter>
         <App />
       </BrowserRouter>
     </WalletProvider>
-
-);
+  </React.StrictMode>
+)
