@@ -2,7 +2,7 @@
   max-width: 960px;
   margin: 0 auto;
   padding: 16px 16px 80px;
-  color: #f9fafb;
+  color: #eaeeee;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text',
     'Segoe UI', sans-serif;
 }
@@ -115,42 +115,7 @@
 
 /* ---------- Top stats strip (wallet summary) ---------- */
 
-.stats-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 14px;
-}
 
-.stat-box {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: #020617;
-  border: 1px solid rgba(31, 41, 55, 0.9);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.75);
-}
-
-.stat-box.primary {
-  background: radial-gradient(circle at 0% 0%, #22c55e, #020617 55%);
-  border-color: rgba(74, 222, 128, 0.6);
-}
-
-.stat-label {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #9ca3af;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #f9fafb;
-  font-variant-numeric: tabular-nums;
-}
 
 /* ---------- Action buttons row ---------- */
 

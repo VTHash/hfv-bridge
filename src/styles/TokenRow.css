@@ -1,0 +1,112 @@
+.token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  color: #e5e7eb; /* light text for dark cards */
+}
+
+/* subtle separator between rows */
+.token-row + .token-row {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+/* left: logo + symbol */
+.token-left {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.token-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  object-fit: contain;
+  flex-shrink: 0;
+  background: #020617; /* dark background so 404s don't look like big white dots */
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.45);
+}
+
+.token-symbol {
+  font-weight: 600;
+  color: inherit; /* uses the light color from .token-row */
+  white-space: nowrap;
+}
+
+/* right: balance + usd, right-aligned */
+.token-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  min-width: 0;
+}
+
+.token-balance {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.78rem;
+  color: #f9fafb; /* brighter for numbers */
+}
+
+.token-value {
+  font-size: 0.76rem;
+  color: #9ca3af; /* softer grey for USD */
+}
+
+/* dust badge */
+.dust-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #fbbf24;
+  text-transform: lowercase;
+}
+
+/* optional tint for whole dust row */
+.token-row.dust .token-balance,
+.token-row.dust .token-value {
+  opacity: 0.9;
+}
+
+/* === Mobile tweaks === */
+@media (max-width: 480px) {
+  .token-row {
+    padding: 3px 0;
+    font-size: 0.8rem;
+  }
+
+  .token-logo {
+    width: 16px;
+    height: 16px;
+  }
+
+  .token-balance {
+    font-size: 0.76rem;
+  }
+
+  .token-value {
+    font-size: 0.72rem;
+  }
+
+  .dust-badge {
+    font-size: 0.6rem;
+    padding: 1px 5px;
+  }
+}
+
+.token-row .shimmer {
+  margin-right: 6px;
+}

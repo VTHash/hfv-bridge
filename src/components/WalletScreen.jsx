@@ -5,8 +5,7 @@ import { useWallet } from '../services/WalletContext'
 import { getAllSupportedChains } from 'hfv-sdk'
 import { CHAIN_LOGOS } from '../config/chainLogos'
 import '../styles/WalletScreen.css'
-import { SUPPORTED_CHAINS } from '../config/walletConnectConfig.js';
-
+import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 const metamaskLogo = '/logo/metamask.png'
 
 function InfoCard({ icon, title, children, defaultOpen = false }) {
@@ -158,7 +157,7 @@ const WalletScreen = () => {
               <li>🔀 Cross-chain bridge for 30+ networks.</li>
               <li>💱 Focused on wrapped native assets & major stablecoins.</li>
               <li>🛡️ Non-custodial: you sign every transaction.</li>
-              <li>📊 Powered by your HFV API for quotes & prices.</li>
+              <li>📊 Powered  HFV API for quotes & prices.</li>
             </ul>
           </div>
 
@@ -270,12 +269,13 @@ const WalletScreen = () => {
             <InfoCard icon="✨" title="2) Supported chains & tokens">
               <ul className="rs-info-list">
                 <li>
-                  HFV Bridge reads the full chain list directly from Wormhole and hfv-sdk.
+                  HFV Bridge reads the full chain list directly.
                 </li>
                 <li>
-                  Token lists.
+                  Token lists are sourced from  registry / LI.FI-backed
+                  datasets.
                 </li>
-                <li>Over 30 chains supported.</li>
+                <li>Check the network and tokens supported.</li>
               </ul>
             </InfoCard>
 
@@ -294,7 +294,7 @@ const WalletScreen = () => {
               <ul className="rs-info-list">
                 <li>You pay standard gas fees on both chains.</li>
                 <li>
-  All operations go through audited Smart Contracts and
+                  All operations go through audited Smart Contracts and
                   cross-chain messaging.
                 </li>
                 <li>HFV never takes custody of user funds.</li>
@@ -304,11 +304,12 @@ const WalletScreen = () => {
         </section>
 
         {/* SUPPORTED CHAINS GRID (logos from /public/logo) */}
+        
         <section className="rs-chains-section">
   <div className="rs-chains-header">
     <h3>Supported blockchains</h3>
     <p>
-      Click any
+      Chains are loaded from your HFV SDK configuration. Click any
       chain to open its block explorer.
     </p>
   </div>
