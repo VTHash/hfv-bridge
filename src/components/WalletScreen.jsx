@@ -5,6 +5,7 @@ import { useWallet } from '../services/WalletContext'
 import { getAllSupportedChains } from 'hfv-sdk'
 import { CHAIN_LOGOS } from '../config/chainLogos'
 import '../styles/WalletScreen.css'
+import { SUPPORTED_CHAINS } from '../config/walletConnectConfig.js';
 
 const metamaskLogo = '/logo/metamask.png'
 
@@ -307,7 +308,7 @@ const WalletScreen = () => {
   <div className="rs-chains-header">
     <h3>Supported blockchains</h3>
     <p>
-      Chains are loaded from  HFV SDK configuration. Click any
+      Click any
       chain to open its block explorer.
     </p>
   </div>
