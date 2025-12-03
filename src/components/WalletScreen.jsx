@@ -85,7 +85,13 @@ const WalletScreen = () => {
               <span className="rs-brand__subtitle">Wormhole powered</span>
             </div>
           </div>
-
+<button
+className="rs-nav-link"
+type="button"
+onClick={() => navigate('/')}
+>
+  Home
+</button>
           <nav className="rs-nav-links">
             <button className="rs-nav-link rs-nav-link--active">Bridge</button>
             <button

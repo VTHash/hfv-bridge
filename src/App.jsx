@@ -12,21 +12,10 @@ const App = () => {
     <div className="app">
       <main className="main-content">
         <Routes>
-          {/* Home: show wallet connect screen or bridge depending on connection */}
-          <Route
-            path="/"
-            element={isConnected ? <BridgeDashboard /> : <WalletScreen />}
-          />
-
-          {/* Direct /bridge route – redirect home if wallet not connected */}
-          <Route
-            path="/bridge"
-            element={isConnected ? <BridgeDashboard /> : <Navigate to="/" replace />}
-          />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+  <Route path="/" element={<WalletScreen />} />
+  <Route path="/bridge" element={<BridgeDashboard />} />
+  
+</Routes>
       </main>
     </div>
   )
