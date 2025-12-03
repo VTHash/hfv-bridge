@@ -5,6 +5,8 @@ import { useWallet } from '../services/WalletContext'
 import { getAllSupportedChains } from 'hfv-sdk'
 import { CHAIN_LOGOS } from '../config/chainLogos'
 import '../styles/WalletScreen.css'
+import Navbar from './Navbar'
+
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 const metamaskLogo = '/logo/metamask.png'
 
@@ -70,7 +72,7 @@ const WalletScreen = () => {
   return (
     <div className="rs-layout">
       {/* NAVBAR (fixed, Reserve-style) */}
-      <header className="rs-navbar">
+      <div className="rs-navbar">
         <div className="rs-navbar__left">
           <div className="rs-brand">
             <img
@@ -135,8 +137,9 @@ const WalletScreen = () => {
               {loading ? 'Connecting…' : 'Connect Wallet'}
             </button>
           )}
+          </div>
         </div>
-      </header>
+        <Navbar />
 
       {/* MAIN */}
       <main className="rs-main">
@@ -394,6 +397,7 @@ const WalletScreen = () => {
               rel="noopener noreferrer"
             >
               <img src="/logo/X.png" alt="X" className="rs-footer__icon" />
+            
             </a>
           </div>
         </div>

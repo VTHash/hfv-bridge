@@ -54,7 +54,7 @@ const TokenRow = ({ token }) => {
       <div className="token-right">
         <span className="token-balance">{formattedBalance}</span>
         <span className="token-value">{usd}</span>
-        {isDust && <span className="dust-badge">dust</span>}
+        {isDust && <span className="balance-badge">balance</span>}
       </div>
     </div>
   );

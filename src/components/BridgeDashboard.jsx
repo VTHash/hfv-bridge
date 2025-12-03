@@ -1,3 +1,4 @@
+// src/components/BridgeDashboard.jsx
 import React, { useMemo, useState } from 'react'
 import {
   HFVClient,
@@ -7,27 +8,28 @@ import {
 } from 'hfv-sdk'
 
 import { useWallet } from '../services/WalletContext'
-import { CHAIN_LOGOS } from '../config/chainLogos'
-import TokenRow from '../components/TokenRow'
-import Shimmer from '../components/Shimmer'
 import '../styles/Dashboard.css'
-import '../styles/TokenRow.css'
-
-// Simple formatters
+import TokenRow from '../components/TokenRow'
+import { CHAIN_LOGOS } from '../config/chainLogos'
+import ChainSelect from './ChainSelect'
+import Navbar from './Navbar'
+// Simple number + USD formatters
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
     Number(n || 0)
   )
 
-// Resolve chain logo from CHAIN_LOGOS or fallbacks
+// Resolve the correct logo path for a chain
 const getChainLogo = (chain) => {
   if (!chain) return '/logo/default.png'
 
+  // Prefer key (e.g. "ethereum", "base", "polygon")
   if (chain.key && CHAIN_LOGOS[chain.key]) return CHAIN_LOGOS[chain.key]
 
-  const key = String(chain.name || '').toLowerCase()
-  if (CHAIN_LOGOS[key]) return CHAIN_LOGOS[key]
+  // Fallback: lowercased name if you ever keyed that way
+  const nameKey = String(chain.name || '').toLowerCase()
+  if (CHAIN_LOGOS[nameKey]) return CHAIN_LOGOS[nameKey]
 
   return '/logo/default.png'
 }
@@ -35,8 +37,19 @@ const getChainLogo = (chain) => {
 export default function BridgeDashboard() {
   const { address } = useWallet()
 
-  // All chains from your HFV SDK
+  // Chains from HFV SDK
   const chains = useMemo(() => getAllSupportedChains(), [])
+
+  // Build a helper map: chainId -> token list
+  const tokenRegistryById = useMemo(() => {
+    const map = {}
+    Object.values(tokenRegistry).forEach((tokens) => {
+      if (!Array.isArray(tokens) || tokens.length === 0) return
+      const id = tokens[0]?.chainId
+      if (id) map[id] = tokens
+    })
+    return map
+  }, [])
 
   // Default FROM / TO
   const defaultFrom =
@@ -53,16 +66,7 @@ export default function BridgeDashboard() {
   const [bridgeLoading, setBridgeLoading] = useState(false)
   const [bridgeResult, setBridgeResult] = useState(null)
   const [error, setError] = useState('')
-
-  // Per-chain "show all tokens" state (pill that opens TokenRow list)
-  const [expandedChains, setExpandedChains] = useState({}) // { [chainId]: true | false }
-
-  const toggleChainTokens = (chainId) => {
-    setExpandedChains((prev) => ({
-      ...prev,
-      [chainId]: !prev[chainId]
-    }))
-  }
+  const [expandedChains, setExpandedChains] = useState({}) // chainId -> bool
 
   // HFV SDK client + bridge
   const client = useMemo(
@@ -81,10 +85,11 @@ export default function BridgeDashboard() {
   const fromChain = chains.find((c) => c.chainId === fromChainId) || null
   const toChain = chains.find((c) => c.chainId === toChainId) || null
 
-  // Available tokens for *current FROM chain* (for the bridge dropdown)
+  // Tokens for the current FROM chain (wrapped natives + stables + blue chips)
   const availableTokens = useMemo(() => {
     if (!fromChain) return []
-    const registryEntry = tokenRegistry[fromChain.chainId] || []
+
+    const registryEntry = tokenRegistryById[fromChain.chainId] || []
     return registryEntry.filter((t) => {
       return (
         t.isNativeWrapped ||
@@ -92,19 +97,17 @@ export default function BridgeDashboard() {
         ['USDC', 'USDT', 'DAI'].includes(t.symbol)
       )
     })
-  }, [fromChain])
+  }, [fromChain, tokenRegistryById])
 
   const selectedToken = useMemo(() => {
     if (!fromChain || !selectedTokenAddress) return null
-    const registryEntry = tokenRegistry[fromChain.chainId] || []
+    const registryEntry = tokenRegistryById[fromChain.chainId] || []
     return (
       registryEntry.find(
         (t) => t.address.toLowerCase() === selectedTokenAddress.toLowerCase()
       ) || null
     )
-  }, [fromChain, selectedTokenAddress])
-
-  // ---------- Bridge actions ----------
+  }, [fromChain, selectedTokenAddress, tokenRegistryById])
 
   async function handleGetQuote() {
     if (!address) {
@@ -112,7 +115,7 @@ export default function BridgeDashboard() {
       return
     }
     if (!fromChain || !toChain || !selectedToken || !amount) {
-      setError('Select source chain, destination chain, token and amount.')
+      setError('Select a source chain, destination chain, token and amount.')
       return
     }
     if (fromChain.chainId === toChain.chainId) {
@@ -137,7 +140,7 @@ export default function BridgeDashboard() {
       setQuote(res)
     } catch (e) {
       console.error('Bridge quote error:', e)
-      setError('Failed to fetch a quote. Please try again.')
+      setError('Failed to fetch a quote. Please try again in a few seconds.')
     } finally {
       setQuoteLoading(false)
     }
@@ -178,89 +181,65 @@ export default function BridgeDashboard() {
     setBridgeResult(null)
   }
 
+  function toggleChainTokens(chainId) {
+    setExpandedChains((prev) => ({
+      ...prev,
+      [chainId]: !prev[chainId]
+    }))
+  }
+
   return (
-    <div className="dashboard">
-      {/* Simple label pill at top */}
+    <div className="rs-layout">
+    <Navbar />
+
+      <div className="dashboard">
+      {/* Top label row */}
       <div className="network-dropdown-wrapper">
         <button type="button" className="network-selector" disabled>
           <span>HFV Bridge • Wormhole Powered</span>
         </button>
       </div>
 
-      {/* --------------------------------------------------
-           1) BRIDGE HUD CARD (keep all logic here)
-      -------------------------------------------------- */}
-      <div className="chain-list">
-        <div className="chain-card bridge-card">
-          {/* FROM / TO row with logos and selects */}
-          <div className="chain-card-header">
-            <div className="bridge-chain-select">
-              <span className="bridge-label">From</span>
-              <div className="bridge-select-wrapper">
-                {fromChain && (
-                  <img
-                    src={getChainLogo(fromChain)}
-                    alt={`${fromChain.name} logo`}
-                    className="bridge-chain-logo"
-                  />
-                )}
-                <select
-                  className="bridge-select"
-                  value={fromChainId}
-                  onChange={(e) => {
-                    setFromChainId(Number(e.target.value))
-                    setQuote(null)
-                    setBridgeResult(null)
-                  }}
-                >
-                  {chains.map((c) => (
-                    <option key={c.chainId} value={c.chainId}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+     
 
-            <button
-              type="button"
-              className="btn-secondary bridge-flip"
-              onClick={handleFlipChains}
-            >
-              ⇅
-            </button>
+    {/* BRIDGE HUD CARD */}
+    <div className="chain-list">
+      <div className="chain-card bridge-card">
+        
+{/* FROM */}
+<ChainSelect
+  label="From"
+  chains={chains}
+  value={fromChainId}
+  onChange={(id) => {
+    setFromChainId(id)
+    setQuote(null)
+    setBridgeResult(null)
+  }}
+/>
 
-            <div className="bridge-chain-select">
-              <span className="bridge-label">To</span>
-              <div className="bridge-select-wrapper">
-                {toChain && (
-                  <img
-                    src={getChainLogo(toChain)}
-                    alt={`${toChain.name} logo`}
-                    className="bridge-chain-logo"
-                  />
-                )}
-                <select
-                  className="bridge-select"
-                  value={toChainId}
-                  onChange={(e) => {
-                    setToChainId(Number(e.target.value))
-                    setQuote(null)
-                    setBridgeResult(null)
-                  }}
-                >
-                  {chains.map((c) => (
-                    <option key={c.chainId} value={c.chainId}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
+<button
+  type="button"
+  className="btn-secondary bridge-flip"
+  onClick={handleFlipChains}
+>
+  ⇅
+</button>
 
-          {/* Token + Amount row */}
-          <div className="chain-card-body">
+{/* TO */}
+<ChainSelect
+  label="To"
+  chains={chains}
+  value={toChainId}
+  onChange={(id) => {
+    setToChainId(id)
+    setQuote(null)
+    setBridgeResult(null)
+  }}
+/>
+
+        {/* Token + Amount */}
+        <div className="chain-card-body">
             <div className="bridge-row">
               <div className="bridge-field">
                 <span className="bridge-label">Token</span>
@@ -300,7 +279,7 @@ export default function BridgeDashboard() {
               </div>
             </div>
 
-            {/* Action buttons */}
+            {/* Actions */}
             <div className="action-row">
               <button
                 type="button"
@@ -352,13 +331,12 @@ export default function BridgeDashboard() {
         </div>
       </div>
 
-      {/* --------------------------------------------------
-           2) CHAIN CARDS LIST (DustClaim-style, with TokenRow)
-      -------------------------------------------------- */}
+      {/* CHAIN CARDS */}
       <div className="chain-list">
         {chains.map((chain) => {
           const logoSrc = getChainLogo(chain)
-          const registryEntry = tokenRegistry[chain.chainId] || []
+          const registryEntry = tokenRegistryById[chain.chainId] || []
+
           const tokensForCard = registryEntry.filter((t) => {
             // Same safety filter: wrapped native + stables + blue chips
             return (
@@ -376,7 +354,7 @@ export default function BridgeDashboard() {
           return (
             <div key={chain.chainId} className="chain-card">
               <div className="chain-card-header">
-                {/* Left side: [ SYMBOL • Name ] pill style */}
+                {/* Left: [ SYMBOL • Name ] pill with logo */}
                 <div className="chain-card-title">
                   <div className="chain-pill">
                     <img
@@ -392,7 +370,7 @@ export default function BridgeDashboard() {
                   </div>
                 </div>
 
-                {/* Right: quick set-from / set-to buttons */}
+                {/* Right: quick "Set as From / To" */}
                 <div className="chain-card-native">
                   <button
                     type="button"
@@ -432,7 +410,7 @@ export default function BridgeDashboard() {
                     const tokenForRow = {
                       ...t,
                       chainId: chain.chainId,
-                      // ensure fields TokenRow expects exist (even if 0)
+                      // TokenRow expects balance + value; default to 0 if not present.
                       balance: t.balance ?? 0,
                       value: t.value ?? t.priceUSD ?? 0
                     }
@@ -468,6 +446,7 @@ export default function BridgeDashboard() {
             </div>
           )
         })}
+      </div>
       </div>
     </div>
   )
