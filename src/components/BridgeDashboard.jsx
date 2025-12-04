@@ -10,7 +10,8 @@ import {
   Contract,
   formatUnits,
   parseUnits,
-  JsonRpcProvider
+  JsonRpcProvider,
+  BrowserProvider
 } from 'ethers'
 
 import { useWallet } from '../services/WalletContext'
@@ -220,15 +221,31 @@ export default function BridgeDashboard() {
   }, [fromChain, selectedTokenAddress, tokenRegistryById])
 
   // --------------------------------------------------
+  // Provider helper: context provider OR window.ethereum
+  // --------------------------------------------------
+  const getSignerProvider = () => {
+    if (provider) return provider
+    if (typeof window !== 'undefined' && window.ethereum) {
+      return new BrowserProvider(window.ethereum)
+    }
+    return null
+  }
+
+  // --------------------------------------------------
   // ethers.js helper: get router for current from-chain
   // --------------------------------------------------
   const getEthersRouter = async () => {
-    if (!provider) {
-      showToast('error', 'No provider available for ethers.js fallback.')
-      return null
-    }
     if (!fromChain) {
       showToast('error', 'No source chain selected.')
+      return null
+    }
+
+    const signerProvider = getSignerProvider()
+    if (!signerProvider) {
+      showToast(
+        'error',
+        'No wallet provider available for ethers.js fallback. Connect a wallet.'
+      )
       return null
     }
 
@@ -241,7 +258,7 @@ export default function BridgeDashboard() {
       return null
     }
 
-    const signer = await provider.getSigner()
+    const signer = await signerProvider.getSigner()
     return new Contract(routerAddress, HFV_BRIDGE_ABI, signer)
   }
 
@@ -371,7 +388,7 @@ export default function BridgeDashboard() {
         formatUnits(dstAmount, decimals)
       )
 
-      // If your router uses 1e18 for fee/gasUsd, adjust here.
+      // Adjust decimals for your router's return values if needed
       const feeUsd = Number(formatUnits(feeAmount, 18))
       const gasUsdNumber = Number(formatUnits(gasUsd, 18))
 
@@ -407,8 +424,13 @@ export default function BridgeDashboard() {
     if (!address || !fromChain || !toChain || !selectedToken || !amount) {
       return null
     }
-    if (!provider) {
-      showToast('error', 'No provider available for ethers.js bridge.')
+
+    const signerProvider = getSignerProvider()
+    if (!signerProvider) {
+      showToast(
+        'error',
+        'No wallet provider available for ethers.js bridge. Connect a wallet.'
+      )
       return null
     }
 
@@ -431,7 +453,7 @@ export default function BridgeDashboard() {
           address
         )
 
-        const feeData = await provider.getFeeData()
+        const feeData = await signerProvider.getFeeData()
         const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
 
         if (gasPrice) {
@@ -471,7 +493,7 @@ export default function BridgeDashboard() {
 
       try {
         if (gasCostNative > 0) {
-          const nativeBalWei = await provider.getBalance(address)
+          const nativeBalWei = await signerProvider.getBalance(address)
           const nativeBal = Number(formatUnits(nativeBalWei, 18))
           if (nativeBal < gasCostNative * 1.05) {
             showToast(
