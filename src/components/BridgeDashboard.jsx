@@ -1,15 +1,21 @@
 // src/components/BridgeDashboard.jsx
 import React, { useMemo, useState, useEffect } from 'react'
-import axios from 'axios'
 import {
   HFVClient,
   HFVBridge,
   getAllSupportedChains,
   tokenRegistry
 } from 'hfv-sdk'
-import { Contract, formatUnits, parseUnits } from 'ethers'
+import {
+  Contract,
+  formatUnits,
+  parseUnits,
+  JsonRpcProvider
+} from 'ethers'
 
 import { useWallet } from '../services/WalletContext'
+import { getMultipleNativePrices, getTokenUsdPrices } from '../services/priceService'
+
 import '../styles/Dashboard.css'
 import TokenRow from '../components/TokenRow'
 import { CHAIN_LOGOS } from '../config/chainLogos'
@@ -26,61 +32,48 @@ const usd = (n) =>
   )
 
 // ---------------------------------------------
-// HFV API base (same as SDK config)
+// HFV API base (still used by HFV SDK only)
 // ---------------------------------------------
 const API_BASE =
   import.meta.env.VITE_HFV_API_BASE_URL ||
   'https://hfv-api.onrender.com/api'
 
 // ---------------------------------------------
-// Minimal ERC-20 ABI for ethers.js fallback
+// Minimal ERC-20 ABI for ethers.js
 // ---------------------------------------------
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
 
 // ---------------------------------------------
+// Public RPC URLs per chain for on-chain balances
+// ---------------------------------------------
+const RPC_URLS = {
+  1: 'https://eth.public-rpc.com', // Ethereum
+  8453: 'https://base-rpc.publicnode.com', // Base
+  56: 'https://bsc-dataseed.binance.org', // BSC
+  137: 'https://polygon-rpc.com', // Polygon
+  42161: 'https://arbitrum-one-rpc.publicnode.com', // Arbitrum
+  10: 'https://mainnet.optimism.io', // Optimism
+  43114: 'https://api.avax.network/ext/bc/C/rpc' // Avalanche
+}
+
+// ---------------------------------------------
 // Bridge router ABI (ethers fallback)
-//
-// ⚠️ IMPORTANT: You MUST adapt this ABI + method
-// names to match your actual HFV bridge router.
 // ---------------------------------------------
 const HFV_BRIDGE_ABI = [
-  // Quote function (example)
-  // function quoteBridge(
-  // address token,
-  // uint256 amount,
-  // uint256 dstChainId,
-  // address recipient
-  // ) view returns (uint256 dstAmount, uint256 feeAmount, uint256 gasUsd)
   'function quoteBridge(address token,uint256 amount,uint256 dstChainId,address recipient) view returns (uint256,uint256,uint256)',
-
-  // Bridge function (example)
-  // function bridgeToken(
-  // address token,
-  // uint256 amount,
-  // uint256 dstChainId,
-  // address recipient
-  // )
   'function bridgeToken(address token,uint256 amount,uint256 dstChainId,address recipient) payable'
 ]
 
 // ---------------------------------------------
 // Per-chain router addresses for ethers fallback
-// Fill these via .env (Vite-style)
 // ---------------------------------------------
 const BRIDGE_ROUTER_ADDRESSES = {
-  // Ethereum mainnet
   1: import.meta.env.VITE_HFV_BRIDGE_ROUTER_ETHEREUM,
-  // Base
   8453: import.meta.env.VITE_HFV_BRIDGE_ROUTER_BASE,
-  // BSC
   56: import.meta.env.VITE_HFV_BRIDGE_ROUTER_BSC,
-  // Polygon
   137: import.meta.env.VITE_HFV_BRIDGE_ROUTER_POLYGON,
-  // Arbitrum One
   42161: import.meta.env.VITE_HFV_BRIDGE_ROUTER_ARBITRUM,
-  // Optimism
   10: import.meta.env.VITE_HFV_BRIDGE_ROUTER_OPTIMISM,
-  // Avalanche C-Chain
   43114: import.meta.env.VITE_HFV_BRIDGE_ROUTER_AVALANCHE
 }
 
@@ -127,7 +120,6 @@ function useToast() {
 // Main component
 // ---------------------------------------------
 export default function BridgeDashboard() {
-  // NOTE: provider is used for ethers.js fallback
   const { address, provider } = useWallet()
   const { toast, showToast } = useToast()
 
@@ -254,91 +246,7 @@ export default function BridgeDashboard() {
   }
 
   // --------------------------------------------------
-  // ethers.js fallback: load balances on current EVM chain
-  // --------------------------------------------------
-  async function refreshPortfolioFallbackEthers() {
-    if (!address || !provider) {
-      showToast(
-        'error',
-        'On-chain fallback requires a connected wallet and provider.'
-      )
-      return
-    }
-
-    try {
-      const network = await provider.getNetwork()
-      const cid = Number(network.chainId)
-
-      const registryTokens = tokenRegistryById[cid] || []
-
-      // Native balance
-      const rawNativeBal = await provider.getBalance(address)
-      const nativeBalance = Number(formatUnits(rawNativeBal, 18))
-
-      let nativePriceUsd = 0
-      const wrappedNative =
-        registryTokens.find((t) => t.isNativeWrapped) || null
-      if (wrappedNative && wrappedNative.priceUSD) {
-        nativePriceUsd = Number(wrappedNative.priceUSD) || 0
-      }
-      const nativeUsd = nativeBalance * nativePriceUsd
-
-      // ERC-20 balances
-      const tokenEntries = await Promise.all(
-        registryTokens.map(async (t) => {
-          try {
-            const contract = new Contract(t.address, ERC20_ABI, provider)
-            const rawBal = await contract.balanceOf(address)
-            const bal = Number(
-              formatUnits(rawBal, t.decimals != null ? t.decimals : 18)
-            )
-            const price = Number(t.priceUSD || 0)
-            const usdValue = bal * price
-            return {
-              addr: String(t.address || '').toLowerCase(),
-              balance: bal,
-              usd: usdValue
-            }
-          } catch (err) {
-            console.error('Fallback ERC20 balance error:', t.symbol, err)
-            return null
-          }
-        })
-      )
-
-      const tokenMap = {}
-      for (const entry of tokenEntries) {
-        if (!entry) continue
-        tokenMap[entry.addr] = {
-          balance: entry.balance,
-          usd: entry.usd
-        }
-      }
-
-      setChainBalances((prev) => ({
-        ...prev,
-        [cid]: {
-          nativeBalance,
-          nativeUsd,
-          tokens: tokenMap
-        }
-      }))
-
-      showToast(
-        'success',
-        `On-chain balances loaded via ethers.js for chainId ${cid}.`
-      )
-    } catch (err) {
-      console.error('On-chain fallback portfolio error:', err)
-      showToast(
-        'error',
-        'On-chain fallback using ethers.js also failed. Try again later.'
-      )
-    }
-  }
-
-  // --------------------------------------------------
-  // Portfolio: HFV API first, then ethers fallback
+  // Portfolio: on-chain balances + CoinGecko prices
   // --------------------------------------------------
   async function refreshPortfolio() {
     if (!address) {
@@ -347,41 +255,82 @@ export default function BridgeDashboard() {
     }
 
     setPortfolioLoading(true)
+
     try {
-      const { data } = await axios.get(`${API_BASE}/wallet/balances`, {
-        params: { address }
-      })
+      const chainIds = chains.map((c) => c.chainId)
+      const nativePrices = await getMultipleNativePrices(chainIds)
 
       const balancesMap = {}
 
-      for (const entry of data?.balances || []) {
-        const cid = Number(entry.chainId)
+      for (const chain of chains) {
+        const chainId = chain.chainId
+        const rpcUrl = RPC_URLS[chainId]
+        if (!rpcUrl) continue
+
+        const rpcProvider = new JsonRpcProvider(rpcUrl)
+
+        // Native balance
+        const nativeBalWei = await rpcProvider.getBalance(address)
+        const nativeBalance = Number(formatUnits(nativeBalWei, 18))
+        const nativePriceUsd = nativePrices[chainId] || 0
+        const nativeUsd = nativeBalance * nativePriceUsd
+
+        // Tokens from registry
+        const registryEntry = tokenRegistryById[chainId] || []
+        const tokenAddresses = registryEntry.map((t) => t.address)
+        const tokenPricesUsd = await getTokenUsdPrices(chainId, tokenAddresses)
+
         const tokenMap = {}
 
-        for (const t of entry.tokens || []) {
-          const addr = String(t.address || '').toLowerCase()
-          tokenMap[addr] = {
-            balance: Number(t.balance || 0),
-            usd: Number(t.usd || t.valueUsd || 0)
+        for (const t of registryEntry) {
+          try {
+            const tokenContract = new Contract(
+              t.address,
+              ERC20_ABI,
+              rpcProvider
+            )
+            const rawBal = await tokenContract.balanceOf(address)
+            const decimals = t.decimals != null ? t.decimals : 18
+            const balance = Number(formatUnits(rawBal, decimals))
+
+            const addrLower = t.address.toLowerCase()
+            let priceUsd = tokenPricesUsd[addrLower] || 0
+
+            // Fallbacks if CoinGecko has no price
+            if (!priceUsd) {
+              if (t.isStablecoin) priceUsd = 1
+              else if (t.isNativeWrapped && nativePriceUsd) {
+                priceUsd = nativePriceUsd
+              }
+            }
+
+            tokenMap[addrLower] = {
+              balance,
+              usd: balance * priceUsd
+            }
+          } catch (err) {
+            console.warn(
+              `Failed to read balance for ${t.symbol} on chain ${chainId}:`,
+              err
+            )
           }
         }
 
-        balancesMap[cid] = {
-          nativeBalance: Number(entry.nativeBalance || 0),
-          nativeUsd: Number(entry.nativeUsd || 0),
+        balancesMap[chainId] = {
+          nativeBalance,
+          nativeUsd,
           tokens: tokenMap
         }
       }
 
       setChainBalances(balancesMap)
-      showToast('success', 'Portfolio balances updated.')
+      showToast('success', 'Portfolio updated (on-chain + CoinGecko).')
     } catch (e) {
-      console.error('Portfolio refresh error (HFV API):', e)
+      console.error('Portfolio refresh error:', e)
       showToast(
         'error',
-        'Could not load balances from HFV API. Falling back to on-chain balances for the connected network.'
+        'Could not load balances/prices. Try again in a bit.'
       )
-      await refreshPortfolioFallbackEthers()
     } finally {
       setPortfolioLoading(false)
     }
@@ -407,14 +356,10 @@ export default function BridgeDashboard() {
       const router = await getEthersRouter()
       if (!router) return null
 
-      // Amount in token decimals
       const decimals = selectedToken.decimals ?? 18
       const parsedAmount = parseUnits(amount, decimals)
-
-      // You may need to map EVM chainId -> router's dstChainId type
       const dstChainParam = BigInt(toChain.chainId)
 
-      // Call quote function on router
       const [dstAmount, feeAmount, gasUsd] = await router.quoteBridge(
         selectedToken.address,
         parsedAmount,
@@ -425,8 +370,10 @@ export default function BridgeDashboard() {
       const estimatedOutputAmount = Number(
         formatUnits(dstAmount, decimals)
       )
-      const feeUsd = Number(formatUnits(feeAmount, 6)) // adjust decimals if needed
-      const gasUsdNumber = Number(formatUnits(gasUsd, 6)) // adjust decimals if needed
+
+      // If your router uses 1e18 for fee/gasUsd, adjust here.
+      const feeUsd = Number(formatUnits(feeAmount, 18))
+      const gasUsdNumber = Number(formatUnits(gasUsd, 18))
 
       const localQuote = {
         source: 'ethers-fallback',
@@ -473,9 +420,6 @@ export default function BridgeDashboard() {
       const parsedAmount = parseUnits(amount, decimals)
       const dstChainParam = BigInt(toChain.chainId)
 
-      // --------------------------------------------------
-      // Gas estimation (native + USD if we know price)
-      // --------------------------------------------------
       let gasCostNative = 0
       let gasCostUsd = 0
 
@@ -494,7 +438,6 @@ export default function BridgeDashboard() {
           const gasCostWei = gasLimit * gasPrice
           gasCostNative = Number(formatUnits(gasCostWei, 18))
 
-          // Try to pull native USD price from registry (wrapped native)
           const registryTokens =
             tokenRegistryById[fromChain.chainId] || []
           const wrappedNative =
@@ -526,9 +469,6 @@ export default function BridgeDashboard() {
         )
       }
 
-      // --------------------------------------------------
-      // (Optional) you might enforce a min balance for gas
-      // --------------------------------------------------
       try {
         if (gasCostNative > 0) {
           const nativeBalWei = await provider.getBalance(address)
@@ -547,22 +487,10 @@ export default function BridgeDashboard() {
         console.error('ethers.js gas balance check error:', balErr)
       }
 
-      // --------------------------------------------------
-      // Execute bridge via router
-      // --------------------------------------------------
       showToast(
         'info',
         'Sending bridge transaction via ethers.js on-chain router…'
       )
-
-      // If your bridge requires msg.value (for native fee), include it here
-      // const tx = await router.bridgeToken(
-      // selectedToken.address,
-      // parsedAmount,
-      // dstChainParam,
-      // address,
-      // { value: nativeFeeWei }
-      // )
 
       const tx = await router.bridgeToken(
         selectedToken.address,
@@ -627,7 +555,6 @@ export default function BridgeDashboard() {
     setQuoteLoading(true)
 
     try {
-      // Primary path: HFV SDK
       const res = await hfvBridge.getQuote({
         fromChain: fromChain.key || fromChain.name,
         toChain: toChain.key || toChain.name,
@@ -672,7 +599,6 @@ export default function BridgeDashboard() {
     showToast('info', 'Sending bridge transaction from your wallet…')
 
     try {
-      // Primary path: HFV SDK
       const res = await hfvBridge.bridge({
         fromChain: fromChain.key || fromChain.name,
         toChain: toChain.key || toChain.name,
@@ -776,7 +702,7 @@ export default function BridgeDashboard() {
         {/* BRIDGE HUD CARD */}
         <div className="chain-list">
           <div className="chain-card bridge-card">
-            {/* FROM / TO selectors (using ChainSelect with logos) */}
+            {/* FROM / TO selectors */}
             <div className="chain-card-header bridge-header-row">
               <ChainSelect
                 label="From"
@@ -796,330 +722,330 @@ export default function BridgeDashboard() {
                 }}
               />
 
-            <button
-              type="button"
-              className="btn-secondary bridge-flip"
-              onClick={handleFlipChains}
-            >
-              ⇅
-            </button>
+              <button
+                type="button"
+                className="btn-secondary bridge-flip"
+                onClick={handleFlipChains}
+              >
+                ⇅
+              </button>
 
-            <ChainSelect
-              label="To"
-              chains={chains}
-              value={toChainId}
-              onChange={(id) => {
-                setToChainId(id)
-                setQuote(null)
-                setBridgeResult(null)
-                setLastGasInfo(null)
-                showToast(
-                  'info',
-                  `To network set to ${
-                    chains.find((c) => c.chainId === id)?.name || 'Network'
-                  }.`
-                )
-              }}
-            />
-          </div>
+              <ChainSelect
+                label="To"
+                chains={chains}
+                value={toChainId}
+                onChange={(id) => {
+                  setToChainId(id)
+                  setQuote(null)
+                  setBridgeResult(null)
+                  setLastGasInfo(null)
+                  showToast(
+                    'info',
+                    `To network set to ${
+                      chains.find((c) => c.chainId === id)?.name || 'Network'
+                    }.`
+                  )
+                }}
+              />
+            </div>
 
-          {/* Token + Amount */}
-          <div className="chain-card-body">
-            <div className="bridge-row">
-              <div className="bridge-field">
-                <span className="bridge-label">Token</span>
-                <select
-                  className="bridge-select"
-                  value={selectedTokenAddress}
-                  onChange={(e) => {
-                    setSelectedTokenAddress(e.target.value)
-                    setQuote(null)
-                    setBridgeResult(null)
-                    setLastGasInfo(null)
-                  }}
+            {/* Token + Amount */}
+            <div className="chain-card-body">
+              <div className="bridge-row">
+                <div className="bridge-field">
+                  <span className="bridge-label">Token</span>
+                  <select
+                    className="bridge-select"
+                    value={selectedTokenAddress}
+                    onChange={(e) => {
+                      setSelectedTokenAddress(e.target.value)
+                      setQuote(null)
+                      setBridgeResult(null)
+                      setLastGasInfo(null)
+                    }}
+                  >
+                    <option value="">Select token</option>
+                    {availableTokens.map((t) => (
+                      <option key={t.address} value={t.address}>
+                        {t.symbol} {t.isStablecoin ? '(Stable)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="bridge-field">
+                  <span className="bridge-label">Amount</span>
+                  <input
+                    className="bridge-input"
+                    type="number"
+                    min="0"
+                    step="0.000001"
+                    placeholder="0.0"
+                    value={amount}
+                    onChange={(e) => {
+                      setAmount(e.target.value)
+                      setQuote(null)
+                      setBridgeResult(null)
+                      setLastGasInfo(null)
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleGetQuote}
+                  disabled={quoteLoading || !address}
                 >
-                  <option value="">Select token</option>
-                  {availableTokens.map((t) => (
-                    <option key={t.address} value={t.address}>
-                      {t.symbol} {t.isStablecoin ? '(Stable)' : ''}
-                    </option>
-                  ))}
-                </select>
+                  {quoteLoading ? '🔍 Fetching quote…' : '🔍 Get Bridge Quote'}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleExecuteBridge}
+                  disabled={!quote || bridgeLoading || !address}
+                >
+                  {bridgeLoading ? '🚀 Bridging…' : '🚀 Execute Bridge'}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={refreshPortfolio}
+                  disabled={portfolioLoading || !address}
+                >
+                  {portfolioLoading ? '📊 Updating…' : '📊 Refresh Balances'}
+                </button>
               </div>
 
-              <div className="bridge-field">
-                <span className="bridge-label">Amount</span>
-                <input
-                  className="bridge-input"
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  placeholder="0.0"
-                  value={amount}
-                  onChange={(e) => {
-                    setAmount(e.target.value)
-                    setQuote(null)
-                    setBridgeResult(null)
-                    setLastGasInfo(null)
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="action-row">
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleGetQuote}
-                disabled={quoteLoading || !address}
-              >
-                {quoteLoading ? '🔍 Fetching quote…' : '🔍 Get Bridge Quote'}
-              </button>
-
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleExecuteBridge}
-                disabled={!quote || bridgeLoading || !address}
-              >
-                {bridgeLoading ? '🚀 Bridging…' : '🚀 Execute Bridge'}
-              </button>
-
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={refreshPortfolio}
-                disabled={portfolioLoading || !address}
-              >
-                {portfolioLoading ? '📊 Updating…' : '📊 Refresh Balances'}
-              </button>
-            </div>
-
-            {/* Quote summary */}
-            {quote && (
-              <div className="price-item bridge-quote">
-                <span>
-                  Estimated Output
-                  {quote.source === 'ethers-fallback' && ' (on-chain)'}
-                </span>
-                <span>
-                  {fmt(quote.estimatedOutputAmount)}{' '}
-                  {selectedToken ? selectedToken.symbol : ''}
-                  {' • '}
-                  Gas ≈ {usd(quote.estimatedGasUsd || 0)}
-                </span>
-              </div>
-            )}
-
-            {/* Extra gas info (ethers fallback) */}
-            {lastGasInfo && (
-              <div className="price-item bridge-quote">
-                <span>Gas (on-chain estimate)</span>
-                <span>
-                  {lastGasInfo.gasCostNative.toFixed(6)}{' '}
-                  {fromChain?.symbol || ''} ({usd(lastGasInfo.gasCostUsd)})
-                </span>
-              </div>
-            )}
-
-            {/* Bridge result / tracking */}
-            {bridgeResult && (
-              <div className="dust-footer">
-                🌉 Bridge started. Tracking ID:{' '}
-                <code>{bridgeResult.trackingId}</code>
-                {bridgeResult.sourceTxHash && (
-                  <>
+              {/* Quote summary */}
+              {quote && (
+                <div className="price-item bridge-quote">
+                  <span>
+                    Estimated Output
+                    {quote.source === 'ethers-fallback' && ' (on-chain)'}
+                  </span>
+                  <span>
+                    {fmt(quote.estimatedOutputAmount)}{' '}
+                    {selectedToken ? selectedToken.symbol : ''}
                     {' • '}
-                    <span>Source tx: {bridgeResult.sourceTxHash}</span>
-                  </>
-                )}
-                {bridgeResult.via === 'ethers-fallback' && (
-                  <>
-                    {' • '}
-                    <span>Path: ethers.js router</span>
-                  </>
-                )}
-              </div>
-            )}
+                    Gas ≈ {usd(quote.estimatedGasUsd || 0)}
+                  </span>
+                </div>
+              )}
 
-            {/* Error */}
-            {error && (
-              <div className="error-message" style={{ marginTop: 8 }}>
-                {error}
-              </div>
-            )}
+              {/* Extra gas info (ethers fallback) */}
+              {lastGasInfo && (
+                <div className="price-item bridge-quote">
+                  <span>Gas (on-chain estimate)</span>
+                  <span>
+                    {lastGasInfo.gasCostNative.toFixed(6)}{' '}
+                    {fromChain?.symbol || ''} ({usd(lastGasInfo.gasCostUsd)})
+                  </span>
+                </div>
+              )}
+
+              {/* Bridge result / tracking */}
+              {bridgeResult && (
+                <div className="dust-footer">
+                  🌉 Bridge started. Tracking ID:{' '}
+                  <code>{bridgeResult.trackingId}</code>
+                  {bridgeResult.sourceTxHash && (
+                    <>
+                      {' • '}
+                      <span>Source tx: {bridgeResult.sourceTxHash}</span>
+                    </>
+                  )}
+                  {bridgeResult.via === 'ethers-fallback' && (
+                    <>
+                      {' • '}
+                      <span>Path: ethers.js router</span>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="error-message" style={{ marginTop: 8 }}>
+                  {error}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* CHAIN CARDS LIST (DustClaim-style, with TokenRow) */}
-      <div className="chain-list">
-        {chains.map((chain) => {
-          const logoSrc = getChainLogo(chain)
-          const registryEntry = tokenRegistryById[chain.chainId] || []
+        {/* CHAIN CARDS LIST (TokenRow-style) */}
+        <div className="chain-list">
+          {chains.map((chain) => {
+            const logoSrc = getChainLogo(chain)
+            const registryEntry = tokenRegistryById[chain.chainId] || []
 
-          const tokensForCard = registryEntry.filter((t) => {
+            const tokensForCard = registryEntry.filter((t) => {
+              return (
+                t.isNativeWrapped ||
+                t.isStablecoin ||
+                ['USDC', 'USDT', 'DAI'].includes(t.symbol)
+              )
+            })
+
+            const isExpanded = !!expandedChains[chain.chainId]
+            const visibleTokens = isExpanded
+              ? tokensForCard
+              : tokensForCard.slice(0, 3)
+
+            const chainBalance = chainBalances[chain.chainId]
+            const nativeBal = chainBalance?.nativeBalance || 0
+            const nativeUsd = chainBalance?.nativeUsd || 0
+
             return (
-              t.isNativeWrapped ||
-              t.isStablecoin ||
-              ['USDC', 'USDT', 'DAI'].includes(t.symbol)
-            )
-          })
-
-          const isExpanded = !!expandedChains[chain.chainId]
-          const visibleTokens = isExpanded
-            ? tokensForCard
-            : tokensForCard.slice(0, 3)
-
-          const chainBalance = chainBalances[chain.chainId]
-          const nativeBal = chainBalance?.nativeBalance || 0
-          const nativeUsd = chainBalance?.nativeUsd || 0
-
-          return (
-            <div key={chain.chainId} className="chain-card">
-              <div className="chain-card-header">
-                {/* Left: [ SYMBOL • Name ] pill with logo */}
-                <div className="chain-card-title">
-                  <div className="chain-pill">
-                    <img
-                      src={logoSrc}
-                      alt={`${chain.name} logo`}
-                      className="chain-card-icon"
-                    />
-                    <span className="chain-pill-symbol">
-                      {chain.symbol || '—'}
-                    </span>
-                    <span className="chain-pill-dot">•</span>
-                    <span className="chain-pill-name">{chain.name}</span>
-                  </div>
-                  {/* Wallet native balance on this chain */}
-                  <div className="chain-card-usd">
-                    {nativeBal > 0
-                      ? `${fmt(nativeBal)} ${
-                          chain.symbol || ''
-                        } (${usd(nativeUsd)})`
-                      : 'Wallet: 0'}
-                  </div>
-                </div>
-
-                {/* Right: quick "Set as From / To" */}
-                <div className="chain-card-native">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => {
-                      setFromChainId(chain.chainId)
-                      setQuote(null)
-                      setBridgeResult(null)
-                      setLastGasInfo(null)
-                      showToast(
-                        'info',
-                        `From network set to ${chain.name || 'Network'}.`
-                      )
-                    }}
-                  >
-                    Set as From
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: 11,
-                      marginLeft: 6
-                    }}
-                    onClick={() => {
-                      setToChainId(chain.chainId)
-                      setQuote(null)
-                      setBridgeResult(null)
-                      setLastGasInfo(null)
-                      showToast(
-                        'info',
-                        `To network set to ${chain.name || 'Network'}.`
-                      )
-                    }}
-                  >
-                    Set as To
-                  </button>
-                </div>
-              </div>
-
-              <div className="chain-card-body">
-                {visibleTokens.length === 0 ? (
-                  <div className="price-item">
-                    <span>Supported tokens</span>
-                    <span>Coming soon</span>
-                  </div>
-                ) : (
-                  visibleTokens.map((t) => {
-                    const addr = t.address.toLowerCase()
-                    const tokenBalInfo =
-                      chainBalance?.tokens?.[addr] || undefined
-
-                    const tokenForRow = {
-                      ...t,
-                      chainId: chain.chainId,
-                      balance: tokenBalInfo?.balance ?? 0,
-                      value:
-                        tokenBalInfo?.usd ??
-                        t.value ??
-                        t.priceUSD ??
-                        0
-                    }
-
-                    return (
-                      <TokenRow
-                        key={`${chain.chainId}-${t.address}`}
-                        token={tokenForRow}
+              <div key={chain.chainId} className="chain-card">
+                <div className="chain-card-header">
+                  {/* Left: [ SYMBOL • Name ] pill with logo */}
+                  <div className="chain-card-title">
+                    <div className="chain-pill">
+                      <img
+                        src={logoSrc}
+                        alt={`${chain.name} logo`}
+                        className="chain-card-icon"
                       />
-                    )
-                  })
-                )}
+                      <span className="chain-pill-symbol">
+                        {chain.symbol || '—'}
+                      </span>
+                      <span className="chain-pill-dot">•</span>
+                      <span className="chain-pill-name">{chain.name}</span>
+                    </div>
+                    {/* Wallet native balance on this chain */}
+                    <div className="chain-card-usd">
+                      {nativeBal > 0
+                        ? `${fmt(nativeBal)} ${
+                            chain.symbol || ''
+                          } (${usd(nativeUsd)})`
+                        : 'Wallet: 0'}
+                    </div>
+                  </div>
 
-                {/* Pill to open full TokenRow list */}
-                {tokensForCard.length > 3 && (
-                  <div className="token-more">
+                  {/* Right: quick "Set as From / To" */}
+                  <div className="chain-card-native">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: 11 }}
+                      onClick={() => {
+                        setFromChainId(chain.chainId)
+                        setQuote(null)
+                        setBridgeResult(null)
+                        setLastGasInfo(null)
+                        showToast(
+                          'info',
+                          `From network set to ${chain.name || 'Network'}.`
+                        )
+                      }}
+                    >
+                      Set as From
+                    </button>
                     <button
                       type="button"
                       className="btn-secondary"
                       style={{
-                        padding: '3px 10px',
+                        padding: '4px 10px',
                         fontSize: 11,
-                        borderRadius: 999
+                        marginLeft: 6
                       }}
-                      onClick={() => toggleChainTokens(chain.chainId)}
+                      onClick={() => {
+                        setToChainId(chain.chainId)
+                        setQuote(null)
+                        setBridgeResult(null)
+                        setLastGasInfo(null)
+                        showToast(
+                          'info',
+                          `To network set to ${chain.name || 'Network'}.`
+                        )
+                      }}
                     >
-                      {isExpanded
-                        ? 'Hide tokens'
-                        : `View all ${tokensForCard.length} tokens`}
+                      Set as To
                     </button>
                   </div>
-                )}
+                </div>
+
+                <div className="chain-card-body">
+                  {visibleTokens.length === 0 ? (
+                    <div className="price-item">
+                      <span>Supported tokens</span>
+                      <span>Coming soon</span>
+                    </div>
+                  ) : (
+                    visibleTokens.map((t) => {
+                      const addr = t.address.toLowerCase()
+                      const tokenBalInfo =
+                        chainBalance?.tokens?.[addr] || undefined
+
+                      const tokenForRow = {
+                        ...t,
+                        chainId: chain.chainId,
+                        balance: tokenBalInfo?.balance ?? 0,
+                        value:
+                          tokenBalInfo?.usd ??
+                          t.value ??
+                          t.priceUSD ??
+                          0
+                      }
+
+                      return (
+                        <TokenRow
+                          key={`${chain.chainId}-${t.address}`}
+                          token={tokenForRow}
+                        />
+                      )
+                    })
+                  )}
+
+                  {/* Pill to open full TokenRow list */}
+                  {tokensForCard.length > 3 && (
+                    <div className="token-more">
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: 11,
+                          borderRadius: 999
+                        }}
+                        onClick={() => toggleChainTokens(chain.chainId)}
+                      >
+                        {isExpanded
+                          ? 'Hide tokens'
+                          : `View all ${tokensForCard.length} tokens`}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
+
+      {/* Floating wallet pill (bottom-right) */}
+      {address && (
+        <div className="hfv-wallet-pill-floating">
+          <span className="hfv-wallet-pill-dot" />
+          <span className="hfv-wallet-pill-label">
+            Connected as {address.slice(0, 6)}…{address.slice(-4)}
+          </span>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className={`hfv-toast hfv-toast--${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
     </div>
-
-    {/* Floating wallet pill (bottom-right) */}
-    {address && (
-      <div className="hfv-wallet-pill-floating">
-        <span className="hfv-wallet-pill-dot" />
-        <span className="hfv-wallet-pill-label">
-          Connected as {address.slice(0, 6)}…{address.slice(-4)}
-        </span>
-      </div>
-    )}
-
-    {/* Toast */}
-    {toast && (
-      <div className={`hfv-toast hfv-toast--${toast.type}`}>
-        {toast.message}
-      </div>
-    )}
-  </div>
   )
 }
