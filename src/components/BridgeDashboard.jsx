@@ -1,11 +1,13 @@
 // src/components/BridgeDashboard.jsx
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
+import axios from 'axios'
 import {
   HFVClient,
   HFVBridge,
   getAllSupportedChains,
   tokenRegistry
 } from 'hfv-sdk'
+import { Contract, formatUnits, parseUnits } from 'ethers'
 
 import { useWallet } from '../services/WalletContext'
 import '../styles/Dashboard.css'
@@ -13,29 +15,121 @@ import TokenRow from '../components/TokenRow'
 import { CHAIN_LOGOS } from '../config/chainLogos'
 import ChainSelect from './ChainSelect'
 import Navbar from './Navbar'
-// Simple number + USD formatters
+
+// ---------------------------------------------
+// Format helpers
+// ---------------------------------------------
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
     Number(n || 0)
   )
 
-// Resolve the correct logo path for a chain
+// ---------------------------------------------
+// HFV API base (same as SDK config)
+// ---------------------------------------------
+const API_BASE =
+  import.meta.env.VITE_HFV_API_BASE_URL ||
+  'https://hfv-api.onrender.com/api'
+
+// ---------------------------------------------
+// Minimal ERC-20 ABI for ethers.js fallback
+// ---------------------------------------------
+const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
+
+// ---------------------------------------------
+// Bridge router ABI (ethers fallback)
+//
+// ⚠️ IMPORTANT: You MUST adapt this ABI + method
+// names to match your actual HFV bridge router.
+// ---------------------------------------------
+const HFV_BRIDGE_ABI = [
+  // Quote function (example)
+  // function quoteBridge(
+  // address token,
+  // uint256 amount,
+  // uint256 dstChainId,
+  // address recipient
+  // ) view returns (uint256 dstAmount, uint256 feeAmount, uint256 gasUsd)
+  'function quoteBridge(address token,uint256 amount,uint256 dstChainId,address recipient) view returns (uint256,uint256,uint256)',
+
+  // Bridge function (example)
+  // function bridgeToken(
+  // address token,
+  // uint256 amount,
+  // uint256 dstChainId,
+  // address recipient
+  // )
+  'function bridgeToken(address token,uint256 amount,uint256 dstChainId,address recipient) payable'
+]
+
+// ---------------------------------------------
+// Per-chain router addresses for ethers fallback
+// Fill these via .env (Vite-style)
+// ---------------------------------------------
+const BRIDGE_ROUTER_ADDRESSES = {
+  // Ethereum mainnet
+  1: import.meta.env.VITE_HFV_BRIDGE_ROUTER_ETHEREUM,
+  // Base
+  8453: import.meta.env.VITE_HFV_BRIDGE_ROUTER_BASE,
+  // BSC
+  56: import.meta.env.VITE_HFV_BRIDGE_ROUTER_BSC,
+  // Polygon
+  137: import.meta.env.VITE_HFV_BRIDGE_ROUTER_POLYGON,
+  // Arbitrum One
+  42161: import.meta.env.VITE_HFV_BRIDGE_ROUTER_ARBITRUM,
+  // Optimism
+  10: import.meta.env.VITE_HFV_BRIDGE_ROUTER_OPTIMISM,
+  // Avalanche C-Chain
+  43114: import.meta.env.VITE_HFV_BRIDGE_ROUTER_AVALANCHE
+}
+
+// Fallback router for any chain not in the map
+const FALLBACK_ROUTER_ADDRESS = import.meta.env.VITE_HFV_BRIDGE_ROUTER || ''
+
+const getRouterAddressForChain = (chainId) =>
+  BRIDGE_ROUTER_ADDRESSES[chainId] || FALLBACK_ROUTER_ADDRESS || ''
+
+// ---------------------------------------------
+// Helper: chain logo resolver
+// ---------------------------------------------
 const getChainLogo = (chain) => {
   if (!chain) return '/logo/default.png'
 
-  // Prefer key (e.g. "ethereum", "base", "polygon")
   if (chain.key && CHAIN_LOGOS[chain.key]) return CHAIN_LOGOS[chain.key]
 
-  // Fallback: lowercased name if you ever keyed that way
   const nameKey = String(chain.name || '').toLowerCase()
   if (CHAIN_LOGOS[nameKey]) return CHAIN_LOGOS[nameKey]
 
   return '/logo/default.png'
 }
 
+// ---------------------------------------------
+// Tiny toast hook
+// ---------------------------------------------
+function useToast() {
+  const [toast, setToast] = useState(null)
+
+  const showToast = (type, message) => {
+    setToast({ type, message, id: Date.now() })
+  }
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  return { toast, showToast }
+}
+
+// ---------------------------------------------
+// Main component
+// ---------------------------------------------
 export default function BridgeDashboard() {
-  const { address } = useWallet()
+  // NOTE: provider is used for ethers.js fallback
+  const { address, provider } = useWallet()
+  const { toast, showToast } = useToast()
 
   // Chains from HFV SDK
   const chains = useMemo(() => getAllSupportedChains(), [])
@@ -51,14 +145,24 @@ export default function BridgeDashboard() {
     return map
   }, [])
 
-  // Default FROM / TO
+  // Default FROM / TO (use last used from localStorage if present)
   const defaultFrom =
     chains.find((c) => c.key === 'ethereum') || chains[0] || null
   const defaultTo =
     chains.find((c) => c.key === 'base') || chains[1] || chains[0] || null
 
-  const [fromChainId, setFromChainId] = useState(defaultFrom?.chainId || 1)
-  const [toChainId, setToChainId] = useState(defaultTo?.chainId || 56)
+  const storedFrom = Number(
+    window.localStorage.getItem('hfv:lastFromChainId') || 0
+  )
+  const storedTo = Number(window.localStorage.getItem('hfv:lastToChainId') || 0)
+
+  const [fromChainId, setFromChainId] = useState(
+    storedFrom || defaultFrom?.chainId || 1
+  )
+  const [toChainId, setToChainId] = useState(
+    storedTo || defaultTo?.chainId || 56
+  )
+
   const [selectedTokenAddress, setSelectedTokenAddress] = useState('')
   const [amount, setAmount] = useState('')
   const [quote, setQuote] = useState(null)
@@ -68,14 +172,19 @@ export default function BridgeDashboard() {
   const [error, setError] = useState('')
   const [expandedChains, setExpandedChains] = useState({}) // chainId -> bool
 
+  // live portfolio per chain: balances + usd
+  const [chainBalances, setChainBalances] = useState({})
+  const [portfolioLoading, setPortfolioLoading] = useState(false)
+
+  // Optional state to store latest gas estimation (ethers fallback)
+  const [lastGasInfo, setLastGasInfo] = useState(null)
+
   // HFV SDK client + bridge
   const client = useMemo(
     () =>
       new HFVClient({
         env: 'mainnet',
-        apiBaseUrl:
-          import.meta.env.VITE_HFV_API_BASE_URL ||
-          'https://hfv-api.onrender.com/api'
+        apiBaseUrl: API_BASE
       }),
     []
   )
@@ -85,7 +194,16 @@ export default function BridgeDashboard() {
   const fromChain = chains.find((c) => c.chainId === fromChainId) || null
   const toChain = chains.find((c) => c.chainId === toChainId) || null
 
-  // Tokens for the current FROM chain (wrapped natives + stables + blue chips)
+  // Persist last used chains
+  useEffect(() => {
+    window.localStorage.setItem('hfv:lastFromChainId', String(fromChainId))
+  }, [fromChainId])
+
+  useEffect(() => {
+    window.localStorage.setItem('hfv:lastToChainId', String(toChainId))
+  }, [toChainId])
+
+  // Tokens for the current FROM chain (wrapped natives + stables)
   const availableTokens = useMemo(() => {
     if (!fromChain) return []
 
@@ -109,26 +227,407 @@ export default function BridgeDashboard() {
     )
   }, [fromChain, selectedTokenAddress, tokenRegistryById])
 
+  // --------------------------------------------------
+  // ethers.js helper: get router for current from-chain
+  // --------------------------------------------------
+  const getEthersRouter = async () => {
+    if (!provider) {
+      showToast('error', 'No provider available for ethers.js fallback.')
+      return null
+    }
+    if (!fromChain) {
+      showToast('error', 'No source chain selected.')
+      return null
+    }
+
+    const routerAddress = getRouterAddressForChain(fromChain.chainId)
+    if (!routerAddress) {
+      showToast(
+        'error',
+        `No bridge router configured for chainId ${fromChain.chainId}.`
+      )
+      return null
+    }
+
+    const signer = await provider.getSigner()
+    return new Contract(routerAddress, HFV_BRIDGE_ABI, signer)
+  }
+
+  // --------------------------------------------------
+  // ethers.js fallback: load balances on current EVM chain
+  // --------------------------------------------------
+  async function refreshPortfolioFallbackEthers() {
+    if (!address || !provider) {
+      showToast(
+        'error',
+        'On-chain fallback requires a connected wallet and provider.'
+      )
+      return
+    }
+
+    try {
+      const network = await provider.getNetwork()
+      const cid = Number(network.chainId)
+
+      const registryTokens = tokenRegistryById[cid] || []
+
+      // Native balance
+      const rawNativeBal = await provider.getBalance(address)
+      const nativeBalance = Number(formatUnits(rawNativeBal, 18))
+
+      let nativePriceUsd = 0
+      const wrappedNative =
+        registryTokens.find((t) => t.isNativeWrapped) || null
+      if (wrappedNative && wrappedNative.priceUSD) {
+        nativePriceUsd = Number(wrappedNative.priceUSD) || 0
+      }
+      const nativeUsd = nativeBalance * nativePriceUsd
+
+      // ERC-20 balances
+      const tokenEntries = await Promise.all(
+        registryTokens.map(async (t) => {
+          try {
+            const contract = new Contract(t.address, ERC20_ABI, provider)
+            const rawBal = await contract.balanceOf(address)
+            const bal = Number(
+              formatUnits(rawBal, t.decimals != null ? t.decimals : 18)
+            )
+            const price = Number(t.priceUSD || 0)
+            const usdValue = bal * price
+            return {
+              addr: String(t.address || '').toLowerCase(),
+              balance: bal,
+              usd: usdValue
+            }
+          } catch (err) {
+            console.error('Fallback ERC20 balance error:', t.symbol, err)
+            return null
+          }
+        })
+      )
+
+      const tokenMap = {}
+      for (const entry of tokenEntries) {
+        if (!entry) continue
+        tokenMap[entry.addr] = {
+          balance: entry.balance,
+          usd: entry.usd
+        }
+      }
+
+      setChainBalances((prev) => ({
+        ...prev,
+        [cid]: {
+          nativeBalance,
+          nativeUsd,
+          tokens: tokenMap
+        }
+      }))
+
+      showToast(
+        'success',
+        `On-chain balances loaded via ethers.js for chainId ${cid}.`
+      )
+    } catch (err) {
+      console.error('On-chain fallback portfolio error:', err)
+      showToast(
+        'error',
+        'On-chain fallback using ethers.js also failed. Try again later.'
+      )
+    }
+  }
+
+  // --------------------------------------------------
+  // Portfolio: HFV API first, then ethers fallback
+  // --------------------------------------------------
+  async function refreshPortfolio() {
+    if (!address) {
+      showToast('info', 'Connect your wallet to load balances.')
+      return
+    }
+
+    setPortfolioLoading(true)
+    try {
+      const { data } = await axios.get(`${API_BASE}/wallet/balances`, {
+        params: { address }
+      })
+
+      const balancesMap = {}
+
+      for (const entry of data?.balances || []) {
+        const cid = Number(entry.chainId)
+        const tokenMap = {}
+
+        for (const t of entry.tokens || []) {
+          const addr = String(t.address || '').toLowerCase()
+          tokenMap[addr] = {
+            balance: Number(t.balance || 0),
+            usd: Number(t.usd || t.valueUsd || 0)
+          }
+        }
+
+        balancesMap[cid] = {
+          nativeBalance: Number(entry.nativeBalance || 0),
+          nativeUsd: Number(entry.nativeUsd || 0),
+          tokens: tokenMap
+        }
+      }
+
+      setChainBalances(balancesMap)
+      showToast('success', 'Portfolio balances updated.')
+    } catch (e) {
+      console.error('Portfolio refresh error (HFV API):', e)
+      showToast(
+        'error',
+        'Could not load balances from HFV API. Falling back to on-chain balances for the connected network.'
+      )
+      await refreshPortfolioFallbackEthers()
+    } finally {
+      setPortfolioLoading(false)
+    }
+  }
+
+  // Auto-refresh portfolio when wallet connects
+  useEffect(() => {
+    if (address) {
+      refreshPortfolio().catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address])
+
+  // --------------------------------------------------
+  // ethers.js fallback: quote + gas estimation
+  // --------------------------------------------------
+  async function getQuoteWithEthersFallback() {
+    if (!address || !fromChain || !toChain || !selectedToken || !amount) {
+      return null
+    }
+
+    try {
+      const router = await getEthersRouter()
+      if (!router) return null
+
+      // Amount in token decimals
+      const decimals = selectedToken.decimals ?? 18
+      const parsedAmount = parseUnits(amount, decimals)
+
+      // You may need to map EVM chainId -> router's dstChainId type
+      const dstChainParam = BigInt(toChain.chainId)
+
+      // Call quote function on router
+      const [dstAmount, feeAmount, gasUsd] = await router.quoteBridge(
+        selectedToken.address,
+        parsedAmount,
+        dstChainParam,
+        address
+      )
+
+      const estimatedOutputAmount = Number(
+        formatUnits(dstAmount, decimals)
+      )
+      const feeUsd = Number(formatUnits(feeAmount, 6)) // adjust decimals if needed
+      const gasUsdNumber = Number(formatUnits(gasUsd, 6)) // adjust decimals if needed
+
+      const localQuote = {
+        source: 'ethers-fallback',
+        estimatedOutputAmount,
+        estimatedGasUsd: gasUsdNumber,
+        feeUsd
+      }
+
+      setQuote(localQuote)
+      setError('')
+      showToast(
+        'success',
+        `Quote via on-chain router. Est. gas ≈ ${usd(gasUsdNumber)}.`
+      )
+
+      return localQuote
+    } catch (err) {
+      console.error('ethers.js quoteBridge fallback error:', err)
+      showToast(
+        'error',
+        'On-chain quote via ethers.js failed. Check router ABI/config.'
+      )
+      return null
+    }
+  }
+
+  // --------------------------------------------------
+  // ethers.js fallback: execute bridge + gas estimate
+  // --------------------------------------------------
+  async function executeBridgeViaEthersFallback() {
+    if (!address || !fromChain || !toChain || !selectedToken || !amount) {
+      return null
+    }
+    if (!provider) {
+      showToast('error', 'No provider available for ethers.js bridge.')
+      return null
+    }
+
+    try {
+      const router = await getEthersRouter()
+      if (!router) return null
+
+      const decimals = selectedToken.decimals ?? 18
+      const parsedAmount = parseUnits(amount, decimals)
+      const dstChainParam = BigInt(toChain.chainId)
+
+      // --------------------------------------------------
+      // Gas estimation (native + USD if we know price)
+      // --------------------------------------------------
+      let gasCostNative = 0
+      let gasCostUsd = 0
+
+      try {
+        const gasLimit = await router.estimateGas.bridgeToken(
+          selectedToken.address,
+          parsedAmount,
+          dstChainParam,
+          address
+        )
+
+        const feeData = await provider.getFeeData()
+        const gasPrice = feeData.maxFeePerGas || feeData.gasPrice
+
+        if (gasPrice) {
+          const gasCostWei = gasLimit * gasPrice
+          gasCostNative = Number(formatUnits(gasCostWei, 18))
+
+          // Try to pull native USD price from registry (wrapped native)
+          const registryTokens =
+            tokenRegistryById[fromChain.chainId] || []
+          const wrappedNative =
+            registryTokens.find((t) => t.isNativeWrapped) || null
+          const nativePriceUsd = wrappedNative?.priceUSD
+            ? Number(wrappedNative.priceUSD)
+            : 0
+          gasCostUsd = gasCostNative * nativePriceUsd
+
+          setLastGasInfo({
+            gasLimit: gasLimit.toString(),
+            gasPrice: gasPrice.toString(),
+            gasCostNative,
+            gasCostUsd
+          })
+
+          showToast(
+            'info',
+            `Est. gas cost ≈ ${gasCostNative.toFixed(6)} ${
+              fromChain.symbol || ''
+            } (${usd(gasCostUsd)}).`
+          )
+        }
+      } catch (gasErr) {
+        console.error('ethers.js gas estimation error:', gasErr)
+        showToast(
+          'error',
+          'Could not estimate gas via ethers.js. Proceeding anyway, check wallet.'
+        )
+      }
+
+      // --------------------------------------------------
+      // (Optional) you might enforce a min balance for gas
+      // --------------------------------------------------
+      try {
+        if (gasCostNative > 0) {
+          const nativeBalWei = await provider.getBalance(address)
+          const nativeBal = Number(formatUnits(nativeBalWei, 18))
+          if (nativeBal < gasCostNative * 1.05) {
+            showToast(
+              'error',
+              `Insufficient native balance for gas. Needed ≈ ${gasCostNative.toFixed(
+                6
+              )} ${fromChain.symbol || ''}.`
+            )
+            return null
+          }
+        }
+      } catch (balErr) {
+        console.error('ethers.js gas balance check error:', balErr)
+      }
+
+      // --------------------------------------------------
+      // Execute bridge via router
+      // --------------------------------------------------
+      showToast(
+        'info',
+        'Sending bridge transaction via ethers.js on-chain router…'
+      )
+
+      // If your bridge requires msg.value (for native fee), include it here
+      // const tx = await router.bridgeToken(
+      // selectedToken.address,
+      // parsedAmount,
+      // dstChainParam,
+      // address,
+      // { value: nativeFeeWei }
+      // )
+
+      const tx = await router.bridgeToken(
+        selectedToken.address,
+        parsedAmount,
+        dstChainParam,
+        address
+      )
+
+      const receipt = await tx.wait()
+
+      const fallbackResult = {
+        via: 'ethers-fallback',
+        trackingId: receipt.transactionHash,
+        sourceTxHash: receipt.transactionHash
+      }
+
+      setBridgeResult(fallbackResult)
+
+      showToast(
+        'success',
+        'Bridge tx confirmed via ethers.js. You can track it in your wallet / explorer.'
+      )
+
+      return fallbackResult
+    } catch (err) {
+      console.error('ethers.js bridgeToken fallback error:', err)
+      showToast(
+        'error',
+        'On-chain bridge via ethers.js failed. Check router ABI/config.'
+      )
+      return null
+    }
+  }
+
+  // --------------------------------------------------
+  // Bridge: quote (HFV SDK first, then ethers)
+  // --------------------------------------------------
   async function handleGetQuote() {
     if (!address) {
       setError('Please connect your wallet first.')
+      showToast('error', 'Connect your wallet before requesting a quote.')
       return
     }
     if (!fromChain || !toChain || !selectedToken || !amount) {
       setError('Select a source chain, destination chain, token and amount.')
+      showToast(
+        'error',
+        'You must pick from-chain, to-chain, token, and amount first.'
+      )
       return
     }
     if (fromChain.chainId === toChain.chainId) {
       setError('Source and destination networks must be different.')
+      showToast('error', 'From and To networks must be different.')
       return
     }
 
     setError('')
     setQuote(null)
     setBridgeResult(null)
+    setLastGasInfo(null)
     setQuoteLoading(true)
 
     try {
+      // Primary path: HFV SDK
       const res = await hfvBridge.getQuote({
         fromChain: fromChain.key || fromChain.name,
         toChain: toChain.key || toChain.name,
@@ -138,14 +637,31 @@ export default function BridgeDashboard() {
       })
 
       setQuote(res)
+
+      const gasUsdNumber = Number(res.estimatedGasUsd || 0)
+      showToast(
+        'success',
+        `Quote received (HFV SDK). Est. gas ≈ ${usd(gasUsdNumber)}.`
+      )
     } catch (e) {
-      console.error('Bridge quote error:', e)
-      setError('Failed to fetch a quote. Please try again in a few seconds.')
+      console.error('Bridge quote error (HFV SDK):', e)
+      showToast(
+        'error',
+        'HFV SDK quote failed. Trying on-chain quote via ethers.js…'
+      )
+
+      const fallbackQuote = await getQuoteWithEthersFallback()
+      if (!fallbackQuote) {
+        setError('Failed to fetch a quote using SDK and ethers fallback.')
+      }
     } finally {
       setQuoteLoading(false)
     }
   }
 
+  // --------------------------------------------------
+  // Bridge: execute (HFV SDK first, then ethers)
+  // --------------------------------------------------
   async function handleExecuteBridge() {
     if (!quote || !fromChain || !toChain || !selectedToken || !amount) return
 
@@ -153,7 +669,10 @@ export default function BridgeDashboard() {
     setBridgeLoading(true)
     setBridgeResult(null)
 
+    showToast('info', 'Sending bridge transaction from your wallet…')
+
     try {
+      // Primary path: HFV SDK
       const res = await hfvBridge.bridge({
         fromChain: fromChain.key || fromChain.name,
         toChain: toChain.key || toChain.name,
@@ -164,11 +683,23 @@ export default function BridgeDashboard() {
       })
 
       setBridgeResult(res)
-    } catch (e) {
-      console.error('Bridge execute error:', e)
-      setError(
-        'Bridge transaction failed. Please check your wallet and try again.'
+      showToast(
+        'success',
+        'Bridge transaction submitted via HFV SDK. Track it in your wallet / explorer.'
       )
+    } catch (e) {
+      console.error('Bridge execute error (HFV SDK):', e)
+      showToast(
+        'error',
+        'HFV SDK bridge failed or was rejected. Trying on-chain bridge via ethers.js…'
+      )
+
+      const fallbackResult = await executeBridgeViaEthersFallback()
+      if (!fallbackResult) {
+        setError(
+          'Bridge transaction failed via SDK and ethers fallback. Please check your wallet and config.'
+        )
+      }
     } finally {
       setBridgeLoading(false)
     }
@@ -179,6 +710,8 @@ export default function BridgeDashboard() {
     setToChainId(fromChainId)
     setQuote(null)
     setBridgeResult(null)
+    setLastGasInfo(null)
+    showToast('info', 'Swapped From/To networks.')
   }
 
   function toggleChainTokens(chainId) {
@@ -188,58 +721,110 @@ export default function BridgeDashboard() {
     }))
   }
 
+  // sum total portfolio USD (from chainBalances)
+  const totalPortfolioUsd = useMemo(() => {
+    return Object.values(chainBalances).reduce(
+      (sum, c) =>
+        sum +
+        Number(c.nativeUsd || 0) +
+        Object.values(c.tokens || {}).reduce(
+          (tSum, t) => tSum + Number(t.usd || 0),
+          0
+        ),
+      0
+    )
+  }, [chainBalances])
+
   return (
     <div className="rs-layout">
-    <Navbar />
+      <Navbar />
 
       <div className="dashboard">
-      {/* Top label row */}
-      <div className="network-dropdown-wrapper">
-        <button type="button" className="network-selector" disabled>
-          <span>HFV Bridge • Wormhole Powered</span>
-        </button>
-      </div>
+        {/* Top label row */}
+        <div className="network-dropdown-wrapper">
+          <button type="button" className="network-selector" disabled>
+            <span>HFV Bridge • Wormhole Powered</span>
+          </button>
+        </div>
 
-     
+        {/* SMALL SUMMARY ROW (no big stats, just compact info) */}
+        <div className="stats-row">
+          <div className="stat-box primary">
+            <div className="stat-label">Wallet</div>
+            <div className="stat-value">
+              {address
+                ? `${address.slice(0, 6)}…${address.slice(-4)}`
+                : 'Not connected'}
+            </div>
+          </div>
+          <div className="stat-box">
+            <div className="stat-label">From → To</div>
+            <div className="stat-value stat-value--chains">
+              {fromChain ? fromChain.name : '—'}{' '}
+              <span className="stat-arrow">→</span>{' '}
+              {toChain ? toChain.name : '—'}
+            </div>
+          </div>
+          <div className="stat-box">
+            <div className="stat-label">Portfolio (all chains)</div>
+            <div className="stat-value">
+              {portfolioLoading ? 'Loading…' : usd(totalPortfolioUsd)}
+            </div>
+          </div>
+        </div>
 
-    {/* BRIDGE HUD CARD */}
-    <div className="chain-list">
-      <div className="chain-card bridge-card">
-        
-{/* FROM */}
-<ChainSelect
-  label="From"
-  chains={chains}
-  value={fromChainId}
-  onChange={(id) => {
-    setFromChainId(id)
-    setQuote(null)
-    setBridgeResult(null)
-  }}
-/>
+        {/* BRIDGE HUD CARD */}
+        <div className="chain-list">
+          <div className="chain-card bridge-card">
+            {/* FROM / TO selectors (using ChainSelect with logos) */}
+            <div className="chain-card-header bridge-header-row">
+              <ChainSelect
+                label="From"
+                chains={chains}
+                value={fromChainId}
+                onChange={(id) => {
+                  setFromChainId(id)
+                  setQuote(null)
+                  setBridgeResult(null)
+                  setLastGasInfo(null)
+                  showToast(
+                    'info',
+                    `From network set to ${
+                      chains.find((c) => c.chainId === id)?.name || 'Network'
+                    }.`
+                  )
+                }}
+              />
 
-<button
-  type="button"
-  className="btn-secondary bridge-flip"
-  onClick={handleFlipChains}
->
-  ⇅
-</button>
+            <button
+              type="button"
+              className="btn-secondary bridge-flip"
+              onClick={handleFlipChains}
+            >
+              ⇅
+            </button>
 
-{/* TO */}
-<ChainSelect
-  label="To"
-  chains={chains}
-  value={toChainId}
-  onChange={(id) => {
-    setToChainId(id)
-    setQuote(null)
-    setBridgeResult(null)
-  }}
-/>
+            <ChainSelect
+              label="To"
+              chains={chains}
+              value={toChainId}
+              onChange={(id) => {
+                setToChainId(id)
+                setQuote(null)
+                setBridgeResult(null)
+                setLastGasInfo(null)
+                showToast(
+                  'info',
+                  `To network set to ${
+                    chains.find((c) => c.chainId === id)?.name || 'Network'
+                  }.`
+                )
+              }}
+            />
+          </div>
 
-        {/* Token + Amount */}
-        <div className="chain-card-body">
+          {/* Token + Amount */}
+          <div className="chain-card-body">
             <div className="bridge-row">
               <div className="bridge-field">
                 <span className="bridge-label">Token</span>
@@ -250,6 +835,7 @@ export default function BridgeDashboard() {
                     setSelectedTokenAddress(e.target.value)
                     setQuote(null)
                     setBridgeResult(null)
+                    setLastGasInfo(null)
                   }}
                 >
                   <option value="">Select token</option>
@@ -274,6 +860,7 @@ export default function BridgeDashboard() {
                     setAmount(e.target.value)
                     setQuote(null)
                     setBridgeResult(null)
+                    setLastGasInfo(null)
                   }}
                 />
               </div>
@@ -298,17 +885,40 @@ export default function BridgeDashboard() {
               >
                 {bridgeLoading ? '🚀 Bridging…' : '🚀 Execute Bridge'}
               </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={refreshPortfolio}
+                disabled={portfolioLoading || !address}
+              >
+                {portfolioLoading ? '📊 Updating…' : '📊 Refresh Balances'}
+              </button>
             </div>
 
             {/* Quote summary */}
             {quote && (
               <div className="price-item bridge-quote">
-                <span>Estimated Output</span>
+                <span>
+                  Estimated Output
+                  {quote.source === 'ethers-fallback' && ' (on-chain)'}
+                </span>
                 <span>
                   {fmt(quote.estimatedOutputAmount)}{' '}
                   {selectedToken ? selectedToken.symbol : ''}
                   {' • '}
-                  Gas ≈ {usd(quote.estimatedGasUsd)}
+                  Gas ≈ {usd(quote.estimatedGasUsd || 0)}
+                </span>
+              </div>
+            )}
+
+            {/* Extra gas info (ethers fallback) */}
+            {lastGasInfo && (
+              <div className="price-item bridge-quote">
+                <span>Gas (on-chain estimate)</span>
+                <span>
+                  {lastGasInfo.gasCostNative.toFixed(6)}{' '}
+                  {fromChain?.symbol || ''} ({usd(lastGasInfo.gasCostUsd)})
                 </span>
               </div>
             )}
@@ -318,6 +928,18 @@ export default function BridgeDashboard() {
               <div className="dust-footer">
                 🌉 Bridge started. Tracking ID:{' '}
                 <code>{bridgeResult.trackingId}</code>
+                {bridgeResult.sourceTxHash && (
+                  <>
+                    {' • '}
+                    <span>Source tx: {bridgeResult.sourceTxHash}</span>
+                  </>
+                )}
+                {bridgeResult.via === 'ethers-fallback' && (
+                  <>
+                    {' • '}
+                    <span>Path: ethers.js router</span>
+                  </>
+                )}
               </div>
             )}
 
@@ -331,14 +953,13 @@ export default function BridgeDashboard() {
         </div>
       </div>
 
-      {/* CHAIN CARDS */}
+      {/* CHAIN CARDS LIST (DustClaim-style, with TokenRow) */}
       <div className="chain-list">
         {chains.map((chain) => {
           const logoSrc = getChainLogo(chain)
           const registryEntry = tokenRegistryById[chain.chainId] || []
 
           const tokensForCard = registryEntry.filter((t) => {
-            // Same safety filter: wrapped native + stables + blue chips
             return (
               t.isNativeWrapped ||
               t.isStablecoin ||
@@ -350,6 +971,10 @@ export default function BridgeDashboard() {
           const visibleTokens = isExpanded
             ? tokensForCard
             : tokensForCard.slice(0, 3)
+
+          const chainBalance = chainBalances[chain.chainId]
+          const nativeBal = chainBalance?.nativeBalance || 0
+          const nativeUsd = chainBalance?.nativeUsd || 0
 
           return (
             <div key={chain.chainId} className="chain-card">
@@ -368,6 +993,14 @@ export default function BridgeDashboard() {
                     <span className="chain-pill-dot">•</span>
                     <span className="chain-pill-name">{chain.name}</span>
                   </div>
+                  {/* Wallet native balance on this chain */}
+                  <div className="chain-card-usd">
+                    {nativeBal > 0
+                      ? `${fmt(nativeBal)} ${
+                          chain.symbol || ''
+                        } (${usd(nativeUsd)})`
+                      : 'Wallet: 0'}
+                  </div>
                 </div>
 
                 {/* Right: quick "Set as From / To" */}
@@ -380,6 +1013,11 @@ export default function BridgeDashboard() {
                       setFromChainId(chain.chainId)
                       setQuote(null)
                       setBridgeResult(null)
+                      setLastGasInfo(null)
+                      showToast(
+                        'info',
+                        `From network set to ${chain.name || 'Network'}.`
+                      )
                     }}
                   >
                     Set as From
@@ -387,11 +1025,20 @@ export default function BridgeDashboard() {
                   <button
                     type="button"
                     className="btn-secondary"
-                    style={{ padding: '4px 10px', fontSize: 11, marginLeft: 6 }}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      marginLeft: 6
+                    }}
                     onClick={() => {
                       setToChainId(chain.chainId)
                       setQuote(null)
                       setBridgeResult(null)
+                      setLastGasInfo(null)
+                      showToast(
+                        'info',
+                        `To network set to ${chain.name || 'Network'}.`
+                      )
                     }}
                   >
                     Set as To
@@ -407,13 +1054,21 @@ export default function BridgeDashboard() {
                   </div>
                 ) : (
                   visibleTokens.map((t) => {
+                    const addr = t.address.toLowerCase()
+                    const tokenBalInfo =
+                      chainBalance?.tokens?.[addr] || undefined
+
                     const tokenForRow = {
                       ...t,
                       chainId: chain.chainId,
-                      // TokenRow expects balance + value; default to 0 if not present.
-                      balance: t.balance ?? 0,
-                      value: t.value ?? t.priceUSD ?? 0
+                      balance: tokenBalInfo?.balance ?? 0,
+                      value:
+                        tokenBalInfo?.usd ??
+                        t.value ??
+                        t.priceUSD ??
+                        0
                     }
+
                     return (
                       <TokenRow
                         key={`${chain.chainId}-${t.address}`}
@@ -447,7 +1102,24 @@ export default function BridgeDashboard() {
           )
         })}
       </div>
-      </div>
     </div>
+
+    {/* Floating wallet pill (bottom-right) */}
+    {address && (
+      <div className="hfv-wallet-pill-floating">
+        <span className="hfv-wallet-pill-dot" />
+        <span className="hfv-wallet-pill-label">
+          Connected as {address.slice(0, 6)}…{address.slice(-4)}
+        </span>
+      </div>
+    )}
+
+    {/* Toast */}
+    {toast && (
+      <div className={`hfv-toast hfv-toast--${toast.type}`}>
+        {toast.message}
+      </div>
+    )}
+  </div>
   )
 }

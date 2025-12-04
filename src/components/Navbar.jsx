@@ -43,10 +43,7 @@ const Navbar = () => {
             alt="HFV Logo"
             className="rs-brand__logo"
           />
-          <div className="rs-brand__text">
-            <span className="rs-brand__title">HFV Bridge</span>
-            <span className="rs-brand__subtitle">Wormhole powered</span>
-          </div>
+          
         </button>
 
         {/* Nav links */}

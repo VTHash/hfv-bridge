@@ -80,10 +80,7 @@ const WalletScreen = () => {
               alt="HFV Logo"
               className="rs-brand__logo"
             />
-            <div className="rs-brand__text">
-              <span className="rs-brand__title">HFV Bridge</span>
-              <span className="rs-brand__subtitle">Wormhole powered</span>
-            </div>
+            
           </div>
 <button
 className="rs-nav-link"
