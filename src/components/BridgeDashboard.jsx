@@ -15,11 +15,7 @@ import {
 } from 'ethers'
 
 import { useWallet } from '../services/WalletContext'
-import {
-  getMultipleNativePrices,
-  getTokenUsdPrices
-} from '../services/priceService'
-import { discoverAllERC20s } from '../services/tokenDiscoveryService'
+import { getMultipleNativePrices, getTokenUsdPrices } from '../services/priceService'
 
 import '../styles/Dashboard.css'
 import TokenRow from '../components/TokenRow'
@@ -49,16 +45,27 @@ const API_BASE =
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
 
 // ---------------------------------------------
-// Public RPC URLs per chain for on-chain balances
+// RPC URLs per chain (Alchemy + optional fallbacks)
 // ---------------------------------------------
+// IMPORTANT: set these in your .env:
+//
+// VITE_RPC_ETHEREUM= https://eth-mainnet.g.alchemy.com/v2/KEY
+// VITE_RPC_BASE= https://base-mainnet.g.alchemy.com/v2/KEY
+// VITE_RPC_POLYGON= https://polygon-mainnet.g.alchemy.com/v2/KEY
+// VITE_RPC_ARBITRUM= https://arb-mainnet.g.alchemy.com/v2/KEY
+// VITE_RPC_OPTIMISM= https://opt-mainnet.g.alchemy.com/v2/KEY
+// VITE_RPC_AVALANCHE= https://avax-mainnet.g.alchemy.com/v2/KEY
+// (BSC is not on Alchemy → keep public node or your own RPC)
 const RPC_URLS = {
-  1: 'https://eth.public-rpc.com', // Ethereum
-  8453: 'https://base-rpc.publicnode.com', // Base
-  56: 'https://bsc-dataseed.binance.org', // BSC
-  137: 'https://polygon-rpc.com', // Polygon
-  42161: 'https://arbitrum-one-rpc.publicnode.com', // Arbitrum
-  10: 'https://mainnet.optimism.io', // Optimism
-  43114: 'https://api.avax.network/ext/bc/C/rpc' // Avalanche
+  1: import.meta.env.VITE_RPC_ETHEREUM,
+  8453: import.meta.env.VITE_RPC_BASE,
+  56:
+    import.meta.env.VITE_RPC_BSC ||
+    'https://bsc-dataseed.binance.org', // BSC (no Alchemy)
+  137: import.meta.env.VITE_RPC_POLYGON,
+  42161: import.meta.env.VITE_RPC_ARBITRUM,
+  10: import.meta.env.VITE_RPC_OPTIMISM,
+  43114: import.meta.env.VITE_RPC_AVALANCHE
 }
 
 // ---------------------------------------------
@@ -131,7 +138,7 @@ export default function BridgeDashboard() {
   // Chains from HFV SDK
   const chains = useMemo(() => getAllSupportedChains(), [])
 
-  // Build a helper map: chainId -> token list (for UI rows + wrapped/native flags)
+  // Build a helper map: chainId -> token list
   const tokenRegistryById = useMemo(() => {
     const map = {}
     Object.values(tokenRegistry).forEach((tokens) => {
@@ -267,7 +274,7 @@ export default function BridgeDashboard() {
   }
 
   // --------------------------------------------------
-  // Portfolio: full Alchemy + CoinGecko across chains
+  // Portfolio: on-chain balances + CoinGecko prices via Alchemy RPC
   // --------------------------------------------------
   async function refreshPortfolio() {
     if (!address) {
@@ -279,7 +286,6 @@ export default function BridgeDashboard() {
 
     try {
       const chainIds = chains.map((c) => c.chainId)
-      // Native prices for all chains (Ether/BNB/MATIC/etc.)
       const nativePrices = await getMultipleNativePrices(chainIds)
 
       const balancesMap = {}
@@ -287,67 +293,54 @@ export default function BridgeDashboard() {
       for (const chain of chains) {
         const chainId = chain.chainId
         const rpcUrl = RPC_URLS[chainId]
-
-        // If no public RPC configured, skip this chain
         if (!rpcUrl) continue
 
         const rpcProvider = new JsonRpcProvider(rpcUrl)
 
-        // -------- Native balance + USD --------
+        // Native balance
         const nativeBalWei = await rpcProvider.getBalance(address)
         const nativeBalance = Number(formatUnits(nativeBalWei, 18))
         const nativePriceUsd = nativePrices[chainId] || 0
         const nativeUsd = nativeBalance * nativePriceUsd
 
-        // -------- ERC-20 balances via Alchemy discovery --------
-        const discoveredTokens = await discoverAllERC20s({
-          provider: rpcProvider,
-          chainId,
-          owner: address
-        })
+        // Tokens from registry
+        const registryEntry = tokenRegistryById[chainId] || []
+        const tokenAddresses = registryEntry.map((t) => t.address)
+        const tokenPricesUsd = await getTokenUsdPrices(chainId, tokenAddresses)
 
         const tokenMap = {}
 
-        if (discoveredTokens && discoveredTokens.length) {
-          const tokenAddresses = discoveredTokens.map((t) => t.address)
-          const tokenPricesUsd = await getTokenUsdPrices(
-            chainId,
-            tokenAddresses
-          )
-
-          for (const t of discoveredTokens) {
-            const addrLower = t.address.toLowerCase()
+        for (const t of registryEntry) {
+          try {
+            const tokenContract = new Contract(
+              t.address,
+              ERC20_ABI,
+              rpcProvider
+            )
+            const rawBal = await tokenContract.balanceOf(address)
             const decimals = t.decimals != null ? t.decimals : 18
+            const balance = Number(formatUnits(rawBal, decimals))
 
-            let rawBal = '0'
-            try {
-              rawBal = t.balance || '0'
-            } catch {
-              rawBal = '0'
-            }
-
-            let balanceNum = 0
-            try {
-              const balBig = BigInt(rawBal)
-              balanceNum = Number(formatUnits(balBig, decimals))
-            } catch {
-              balanceNum = 0
-            }
-
+            const addrLower = t.address.toLowerCase()
             let priceUsd = tokenPricesUsd[addrLower] || 0
 
-            // Simple stablecoin fallback if CG doesn't know it
-            if (!priceUsd && t.symbol) {
-              const sym = t.symbol.toUpperCase()
-              if (sym === 'USDC' || sym === 'USDT' || sym === 'DAI') {
-                priceUsd = 1
+            // Fallbacks if CoinGecko has no price
+            if (!priceUsd) {
+              if (t.isStablecoin) priceUsd = 1
+              else if (t.isNativeWrapped && nativePriceUsd) {
+                priceUsd = nativePriceUsd
               }
             }
 
             tokenMap[addrLower] = {
-              balance: balanceNum,
-              usd: balanceNum * priceUsd
+              balance,
+              usd: balance * priceUsd
             }
+          } catch (err) {
+            console.warn(
+              `Failed to read balance for ${t.symbol} on chain ${chainId}:`,
+              err
+            )
           }
         }
 
@@ -359,7 +352,7 @@ export default function BridgeDashboard() {
       }
 
       setChainBalances(balancesMap)
-      showToast('success', 'Portfolio updated (Alchemy + CoinGecko).')
+      showToast('success', 'Portfolio updated (on-chain + CoinGecko).')
     } catch (e) {
       console.error('Portfolio refresh error:', e)
       showToast(
@@ -402,11 +395,9 @@ export default function BridgeDashboard() {
         address
       )
 
-      const estimatedOutputAmount = Number(
-        formatUnits(dstAmount, decimals)
-      )
+      const estimatedOutputAmount = Number(formatUnits(dstAmount, decimals))
 
-      // NOTE: adjust decimals if your router returns different scaling
+      // Adjust decimals for your router's return values if needed
       const feeUsd = Number(formatUnits(feeAmount, 18))
       const gasUsdNumber = Number(formatUnits(gasUsd, 18))
 
