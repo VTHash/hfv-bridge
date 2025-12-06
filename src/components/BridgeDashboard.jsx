@@ -54,26 +54,26 @@ const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
 // ---------------------------------------------
 const RPC_URLS = {
   1:
-    import.meta.env.VITE_RPC_ETHEREUM ||
-    'https://eth.public-rpc.com', // Ethereum
+    import.meta.env.VITE_RPC_ETHEREUM
+    , // Ethereum
   8453:
-    import.meta.env.VITE_RPC_BASE ||
-    'https://base-rpc.publicnode.com', // Base
+    import.meta.env.VITE_RPC_BASE 
+    , 
   56:
-    import.meta.env.VITE_RPC_BSC ||
-    'https://bsc-dataseed.binance.org', // BSC
+    import.meta.env.VITE_RPC_BSC 
+   , // BSC
   137:
-    import.meta.env.VITE_RPC_POLYGON ||
-    'https://polygon-rpc.com', // Polygon
+    import.meta.env.VITE_RPC_POLYGON 
+    , // Polygon
   42161:
-    import.meta.env.VITE_RPC_ARBITRUM ||
-    'https://arbitrum-one-rpc.publicnode.com', // Arbitrum
+    import.meta.env.VITE_RPC_ARBITRUM 
+    , // Arbitrum
   10:
-    import.meta.env.VITE_RPC_OPTIMISM ||
-    'https://mainnet.optimism.io', // Optimism
+    import.meta.env.VITE_RPC_OPTIMISM 
+    , // Optimism
   43114:
-    import.meta.env.VITE_RPC_AVALANCHE ||
-    'https://api.avax.network/ext/bc/C/rpc' // Avalanche
+    import.meta.env.VITE_RPC_AVALANCHE 
+     // Avalanche
 }
 
 // ---------------------------------------------
